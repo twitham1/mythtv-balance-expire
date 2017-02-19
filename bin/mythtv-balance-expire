@@ -12,11 +12,19 @@
 
 use warnings;
 use MythTV;
+use Getopt::Long;
+
+my $usage = "usage: $0 [--go]
+--verbose	show the commands that would be run, or are being run:
+--go		actually do the copy, else just show what would be done
+";
+GetOptions(\%opt, qw(go verbose)) or die $usage;
 
 # How to copy the files.  If successful, originals are unlinked
-my $copy = 'rsync -av --progress'; # must exit 0 on success only
-my $recent = time - 3 * 24 * 60 * 60; # don't move recent files
-
+my @copy = qw/rsync -a/;	      # must exit 0 on success only
+push @copy, '--progress' if -t STDIN;
+my $RECENT = time - 3 * 24 * 60 * 60; # don't move recent files
+my $MAX = 0.7;			# maximum free space to use for copies
 my $KB = 1024;
 my $MB = $KB * $KB;
 my $GB = $MB * $KB;
@@ -35,7 +43,7 @@ foreach my $row (@{$rows{'rows'}}) {
     my $path = $show->{local_path};
     (my $dir = $path) =~ s@/[^/]+$@@;
     $dir =~ m@/@ or next;	# only old files in a local path
-    $show->{lastmodified} < $recent or next;
+    $show->{lastmodified} < $RECENT or next;
     $show->{auto_expire} ? (push @{$exp{$dir}}, $key) : $keep{$dir}{$key}++;
     $size{$key} = $show->{filesize};
     $title{$key} = "$show->{title} / $show->{subtitle}";
@@ -54,47 +62,53 @@ while (1) {			# "last" will exit
     my $nmore = @{$exp{$more}};	# count of expires
     my $nless = @{$exp{$less}};
 
-    # print "--- $n disk goal = $goal/$exp: $nmore=$more -> $nless=$less ---\n";
-    last
+    last			# done if balanced!
 	if $nless > $goal or $nmore < $goal;
 
-    # oldest expire is best candidate for move
+    # assume oldest expire is best candidate for move
     my $move = shift @{$exp{$more}} or
 	print "nothing left to move, exiting\n"
 	and last;
-    &move($more, $less, $move, '<') # move expiring file
-	or next;
+    my $code = &move($more, $less, $move, '<'); # move expiring file
+    $code < 0 and last;				# bail out on error
+    $code > 0 or next;				# keep going on skip
     push @{$exp{$less}}, $move;	# record the move to new disk
 
     # keep similar age per disk by skipping alternate expires
     push@{$exp{$more}}, shift @{$exp{$more}};
 
-    # find keeper file closest to sum moved bytes for this disk so far
-    my $find = $moved{$less};
+    # find keeper file closest to sum moved bytes for this disk
+    my $find = $moved{$less};	# global sum is set by &move below
     my $swap = (sort { abs($size{$a} - $find) <=>
 			   abs($size{$b} - $find) } keys %{$keep{$less}})[0];
     $swap or
 	print "nothing left to swap, exiting\n"
 	and last;
-    &move($less, $more, $swap, '>') # move keeper file
-	or last;
-    $keep{$more}{$swap}++; delete $keep{$less}{$swap};
+    $code = &move($less, $more, $swap, '>'); # move keeper file
+    $code < 1 and last;
+    $keep{$more}{$swap}++; delete $keep{$less}{$swap}; # record move
 }
 
-sub move {
+sub move {		 # -1 = copy error, 0 = skip, 1 = copy success
     my($src, $dst, $file, $which) = @_;
     my $free = &free($dst) * $KB;
-    if ($size{$file} > $free * 0.8) {
-	printf "skipping %.0f MB $file, too tight to move to $dst at %.0f MB free | $title{$file}\n",
-	$size{$file} / $MB, $free / $MB;
+    if ($size{$file} > $free * $MAX) { # file too big?
+	printf "skipping %.3f GB $file > %.3f * $MAX free on $dst | %s\n",
+	$size{$file} / $GB, $free / $GB, $title{$file};
 	return 0;
     }
-    my $exp = @{$exp{$dst}};
-    printf "$which %7.3f $file: $src -> $dst %6.3f %3d | $title{$file}\n",
-    $size{$file} / $GB, $free / $GB, $exp;
+    printf "$which %7.3f $file: $src -> $dst %6.3f %3d $which %s\n",
+    $size{$file} / $GB, $free / $GB, scalar(@{$exp{$dst}}), $title{$file};
 
-    # copy && unlink each of glob(${file}*) here, returning 0 on failure
-    
+    my @src = glob "$src/${file}*"; # list includes thumbnails
+    my @cmd = (@copy, @src, "$dst/");
+    $opt{verbose} and print "@cmd\n";
+    if ($opt{go}) {		# actually do copy and unlink
+	system(@cmd) == 0
+	    or warn sprintf("exit %d from (@cmd)\n", $? >> 8)
+	    and return -1;
+	map { unlink $_ or warn "could not unlink $_: $!\n" } @src;
+    }
     $moved{$src} -= $size{$file}; # global: sum bytes moved per disk
     $moved{$dst} += $size{$file};
     return 1;			# only if copy/unlink successful
