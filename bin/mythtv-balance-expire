@@ -6,12 +6,14 @@
 # of recorded time.  This moves oldest expiration from disk with the
 # most to disk with the least and trades it for the keeper of closest
 # size.  Repeats swaps until expirations are better distributed on all
-# disks.  This will exit when there are no files small enough for swap
-# in the available space.  Assumptions: all files are local.
+# disks.  Exits when there are no files small enough for swap in the
+# available space.  Assumptions: all files are local.  Tested with 2
+# local disks but should work with any amount.
 
 use warnings;
 use MythTV;
 
+# How to copy the files.  If successful, originals are unlinked
 my $copy = 'rsync -av --progress'; # must exit 0 on success only
 my $recent = time - 3 * 24 * 60 * 60; # don't move recent files
 
@@ -52,7 +54,7 @@ while (1) {			# "last" will exit
     my $nmore = @{$exp{$more}};	# count of expires
     my $nless = @{$exp{$less}};
 
-    print "--- $n disk goal = $goal/$exp: $nmore=$more -> $nless=$less ---\n";
+    # print "--- $n disk goal = $goal/$exp: $nmore=$more -> $nless=$less ---\n";
     last
 	if $nless > $goal or $nmore < $goal;
 
@@ -60,7 +62,7 @@ while (1) {			# "last" will exit
     my $move = shift @{$exp{$more}} or
 	print "nothing left to move, exiting\n"
 	and last;
-    &move($more, $less, $move)	# move expiring file
+    &move($more, $less, $move, '<') # move expiring file
 	or next;
     push @{$exp{$less}}, $move;	# record the move to new disk
 
@@ -74,21 +76,22 @@ while (1) {			# "last" will exit
     $swap or
 	print "nothing left to swap, exiting\n"
 	and last;
-    &move($less, $more, $swap)	# move keeper file
+    &move($less, $more, $swap, '>') # move keeper file
 	or last;
     $keep{$more}{$swap}++; delete $keep{$less}{$swap};
 }
 
 sub move {
-    my($src, $dst, $file) = @_;
+    my($src, $dst, $file, $which) = @_;
     my $free = &free($dst) * $KB;
     if ($size{$file} > $free * 0.8) {
 	printf "skipping %.0f MB $file, too tight to move to $dst at %.0f MB free | $title{$file}\n",
 	$size{$file} / $MB, $free / $MB;
 	return 0;
     }
-    printf "%7.3f $file: %6.3f $src -> $dst %6.3f | $title{$file}\n",
-    $size{$file} / $GB, &free($src) * $KB / $GB, $free / $GB;
+    my $exp = @{$exp{$dst}};
+    printf "$which %7.3f $file: $src -> $dst %6.3f %3d | $title{$file}\n",
+    $size{$file} / $GB, $free / $GB, $exp;
 
     # copy && unlink each of glob(${file}*) here, returning 0 on failure
     
