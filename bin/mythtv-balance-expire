@@ -21,7 +21,7 @@ my $usage = "usage: $0 [--go]
 GetOptions(\%opt, qw(go verbose)) or die $usage;
 
 # How to copy the files.  If successful, originals are unlinked
-my @copy = qw/rsync -a/;	      # must exit 0 on success only
+my @copy = qw/ionice -n 7 nice rsync -a/; # must exit 0 on success only
 push @copy, '--progress' if -t STDIN;
 my $RECENT = time - 3 * 24 * 60 * 60; # don't move recent files
 my $MAX = 0.7;			# maximum free space to use for copies
@@ -65,6 +65,9 @@ while (1) {			# "last" will exit
     last			# done if balanced!
 	if $nless > $goal or $nmore < $goal;
 
+    # keep similar age per disk by skipping alternate expires
+    push@{$exp{$more}}, shift @{$exp{$more}};
+
     # assume oldest expire is best candidate for move
     my $move = shift @{$exp{$more}} or
 	print "nothing left to move, exiting\n"
@@ -73,9 +76,6 @@ while (1) {			# "last" will exit
     $code < 0 and last;				# bail out on error
     $code > 0 or next;				# keep going on skip
     push @{$exp{$less}}, $move;	# record the move to new disk
-
-    # keep similar age per disk by skipping alternate expires
-    push@{$exp{$more}}, shift @{$exp{$more}};
 
     # find keeper file closest to sum moved bytes for this disk
     my $find = $moved{$less};	# global sum is set by &move below
