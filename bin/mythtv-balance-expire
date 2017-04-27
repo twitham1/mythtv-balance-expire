@@ -14,9 +14,9 @@ use warnings;
 use MythTV;
 use Getopt::Long;
 
-my $usage = "usage: $0 [--go]
+my $usage = "usage: $0 [options]
 --verbose	show the commands that would be run, or are being run:
---go		actually do the copy, else just show what would be done
+--go		actually do the moves, else just show what would be done
 ";
 GetOptions(\%opt, qw(go verbose)) or die $usage;
 
@@ -30,14 +30,14 @@ my $MB = $KB * $KB;
 my $GB = $MB * $KB;
 my %exp;			# {dir}[ordered expiring basenames]
 my %keep;			# {dir}{keeping basenames}
-my %moved;			# {dir} = bytes moved per disk
 my %size;			# {basename} = bytes in file
 my %title;			# {basename} = "title / subtitle"
+my %moved;			# {dir} = bytes moved per disk
 
-my $myth = new MythTV();   # we'll keep expires in chronological order
+my $myth = new MythTV();   # we'll keep expires in chronological order:
 my %rows = $myth->backend_rows('QUERY_RECORDINGS Ascending');
 
-foreach my $row (@{$rows{'rows'}}) {
+foreach my $row (@{$rows{'rows'}}) { # gather status and location of shows
     my $show = $myth->new_recording(@$row);
     my $key = $show->{basename};
     my $path = $show->{local_path};
@@ -73,11 +73,11 @@ while (1) {			# "last" will exit
 	print "nothing left to move, exiting\n"
 	and last;
     my $code = &move($more, $less, $move, '<'); # move expiring file
-    $code < 0 and last;				# bail out on error
-    $code > 0 or next;				# keep going on skip
+    $code < 0 and last;		# bail out on copy error
+    $code > 0 or next;		# keep going on file skip
     push @{$exp{$less}}, $move;	# record the move to new disk
 
-    # find keeper file closest to sum moved bytes for this disk
+    # trade keeper file closest to sum moved bytes for this disk
     my $find = $moved{$less};	# global sum is set by &move below
     my $swap = (sort { abs($size{$a} - $find) <=>
 			   abs($size{$b} - $find) } keys %{$keep{$less}})[0];
@@ -88,6 +88,8 @@ while (1) {			# "last" will exit
     $code < 1 and last;
     $keep{$more}{$swap}++; delete $keep{$less}{$swap}; # record move
 }
+$opt{go} or
+    print "NOTHING DONE!  Add --go to actually do the trades.\n";
 
 sub move {		 # -1 = copy error, 0 = skip, 1 = copy success
     my($src, $dst, $file, $which) = @_;
@@ -97,7 +99,7 @@ sub move {		 # -1 = copy error, 0 = skip, 1 = copy success
 	$size{$file} / $GB, $free / $GB, $title{$file};
 	return 0;
     }
-    printf "$which %7.3f $file: $src -> $dst %6.3f %3d $which %s\n",
+    printf "$which %7.3f $file: $src -> $dst %6.3f %4d $which %s\n",
     $size{$file} / $GB, $free / $GB, scalar(@{$exp{$dst}}), $title{$file};
 
     my @src = glob "$src/${file}*"; # list includes thumbnails
@@ -111,12 +113,12 @@ sub move {		 # -1 = copy error, 0 = skip, 1 = copy success
     }
     $moved{$src} -= $size{$file}; # global: sum bytes moved per disk
     $moved{$dst} += $size{$file};
-    return 1;			# only if copy/unlink successful
+    return 1;			# only if copy successful
 }
 
 sub free { return (&df(shift))[3]; } # free space of path in KB
 
-sub df {
+sub df {			# df of $file in KB
     my($file) = @_;
     my @out = split "\n", `df -k $file`;
     return split /\s+/, $out[-1];
