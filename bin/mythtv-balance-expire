@@ -13,12 +13,16 @@ use warnings;
 use MythTV;
 use Getopt::Long;
 
+my %opt = (delta => 5);	       # lower = better balance but more moves
 my $usage = "usage: $0 [options]
---subtitles	show moving subtitles in addition to titles
+--delta=N	expiring count delta allowed between disks [$opt{delta}]
+		lower = better balance, higher = less moves
+	hint: --delta 9999 to see current expiring balance w/no moves
+--subtitles	add subtitles to titles of moving files
 --verbose	show the commands that would be run, or are being run:
 --go		actually do the moves, else just show what would be done
 ";
-GetOptions(\%opt, qw(go verbose subtitles)) or die $usage;
+GetOptions(\%opt, qw(delta=i subtitles verbose go)) or die $usage;
 
 # How to copy the files.  If successful, originals are unlinked
 my @copy = qw/ionice -n 7 nice rsync -a/; # must exit 0 on success only
@@ -36,6 +40,7 @@ my %moved;			# {dir} = bytes moved per disk
 my %where;			# {basename} = dir
 my %done;			# {dir}{basename} final locations
 my %free;			# {dir} = bytes free on disk
+my %count = qw/< 0 > 0/;	# {type} = count of moves
 
 my $myth = new MythTV();   # we'll keep expires in chronological order:
 my %rows = $myth->backend_rows('QUERY_RECORDINGS Ascending');
@@ -73,7 +78,7 @@ for my $move (@exp) {		# expirables in time order
 	$done{$where{$move}}{$move}++;
 	next;
     }
-    if ((keys %{$done{$more}}) - (keys %{$done{$less}}) < 2) {
+    if ((keys %{$done{$more}}) - (keys %{$done{$less}}) < $opt{delta}) {
 	$done{$more}{$move}++;	# balanced, keep it here
 	next;
     }
@@ -97,7 +102,8 @@ for my $move (@exp) {		# expirables in time order
     $keep{$more}{$swap}++; delete $keep{$less}{$swap}; # record move
 }
 $opt{go} or
-    print "NOTHING DONE!  Add --go to actually do the trades.\n";
+    print "NOTHING DONE!  Add --go to actually move <",
+    $count{'<'}, " expires< and >", $count{'>'}, " keepers>.\n";
 
 sub move {		 # -1 = copy error, 0 = skip, 1 = copy success
     my($src, $dst, $file, $which) = @_;
@@ -114,8 +120,8 @@ sub move {		 # -1 = copy error, 0 = skip, 1 = copy success
 	$free{$src} += $size{$file};
 	$free{$dst} -= $size{$file};
     }
-    printf "$which %7.3f $file: $src -> $dst %6.3f %4d $which %s\n",
-    $size{$file} / $GB, $free / $GB, scalar(keys %{$done{$dst}}), $title{$file};
+    printf "$which %7.3f $file: $src -> $dst %4d %7.3f $which %s\n",
+    $size{$file} / $GB, scalar(keys %{$done{$dst}}), $free / $GB, $title{$file};
 
     my @src = glob "$src/${file}*"; # list includes thumbnails
     my @cmd = (@copy, @src, "$dst/");
@@ -129,6 +135,7 @@ sub move {		 # -1 = copy error, 0 = skip, 1 = copy success
     $moved{$src} -= $size{$file}; # global: sum bytes moved per disk
     $moved{$src} < 0 and $moved{$src} = 0;
     $moved{$dst} += $size{$file};
+    $count{$which}++;
     return 1;			# only if copy successful
 }
 
