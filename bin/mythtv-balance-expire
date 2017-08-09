@@ -3,14 +3,11 @@
 # mythtv-balance-expire by twitham@sbcglobal.net, 2017-02-18
 
 # All disks must have expiring recordings, ideally from the full range
-# of recorded time.  This moves oldest expiration from disk with the
-# most to disk with the least and trades it for the keeper of closest
-# size.  Repeats swaps until expirations are better distributed on all
-# disks.  Exits when there are no files small enough for swap in the
-# available space.  Assumptions: all files are local.  Tested with 2
-# local disks but should work with any amount.
-
-# TODO: for new disks, move keepers until balanced headroom
+# of recorded time.  This distributes expirable recordings evenly over
+# all disks over time.  By default it trades for the keeper of closest
+# size - ideal for full disks (use --notrade when adding new disks).
+# Assumptions: all files are local.  Tested with 2 local disks but
+# should work with any amount.
 
 use warnings;
 use MythTV;
@@ -18,10 +15,11 @@ use Getopt::Long;
 
 my $usage = "usage: $0 [options]
 --notrade	only move expires, with no trade (use for new disks)
+--free=GB	skip copies that would leave less than GB free space
 --verbose	show the commands that would be run, or are being run:
 --go		actually do the moves, else just show what would be done
 ";
-GetOptions(\%opt, qw(go verbose notrade)) or die $usage;
+GetOptions(\%opt, qw(go verbose notrade free=i)) or die $usage;
 
 # How to copy the files.  If successful, originals are unlinked
 my @copy = qw/ionice -n 7 nice rsync -a/; # must exit 0 on success only
@@ -31,11 +29,13 @@ my $MAX = 0.7;			# maximum free space to use for copies
 my $KB = 1024;
 my $MB = $KB * $KB;
 my $GB = $MB * $KB;
-my %exp;			# {dir}[ordered expiring basenames]
+my @exp;			# ordered expiring basenames
 my %keep;			# {dir}{keeping basenames}
 my %size;			# {basename} = bytes in file
 my %title;			# {basename} = "title / subtitle"
 my %moved;			# {dir} = bytes moved per disk
+my %where;			# {basename} = dir
+my %done;			# {dir}{basename} final locations
 
 my $myth = new MythTV();   # we'll keep expires in chronological order:
 my %rows = $myth->backend_rows('QUERY_RECORDINGS Ascending');
@@ -47,38 +47,36 @@ foreach my $row (@{$rows{'rows'}}) { # gather status and location of shows
     (my $dir = $path) =~ s@/[^/]+$@@;
     $dir =~ m@/@ or next;	# only old files in a local path
     $show->{lastmodified} < $RECENT or next;
-    $show->{auto_expire} ? (push @{$exp{$dir}}, $key) : $keep{$dir}{$key}++;
     $size{$key} = $show->{filesize};
     $title{$key} = "$show->{title} / $show->{subtitle}";
+    $where{$key} = $dir;
+    $done{$dir} or $done{$dir} = {};
+    $show->{auto_expire} ? push @exp, $key : $keep{$dir}{$key}++;
 }
 
-my $n = my @path = keys %exp;	# storage paths found
+my $n = my @path = sort keys %done; # storage paths found
 $n > 1 or die "need 2 or more paths to balance, found: @path\n";
+$n = 1;
+map { $n{$_} = $n++ } @path;
 
-my $exp = 0; map { $exp += @{$exp{$_}} } @path;
-my $goal = int($exp / $n);	# expires per disk, ideal
-
-while (1) {			# "last" will exit
-    my @p = sort { @{$exp{$a}} <=> @{$exp{$b}} } @path;
-    my $more = pop @p;		# path with more expires
-    my $less = shift @p;	# path with less expires
-    my $nmore = @{$exp{$more}};	# count of expires
-    my $nless = @{$exp{$less}};
-
-    last			# done if balanced!
-	if $nless >= $goal or $nmore <= $goal;
-
-    # keep similar age per disk by skipping alternate expires
-    push@{$exp{$more}}, shift @{$exp{$more}};
-
-    # assume oldest expire is best candidate for move
-    my $move = shift @{$exp{$more}} or
-	print "nothing left to move, exiting\n"
-	and last;
+for my $move (@exp) {
+    my @p = sort { keys %{$done{$a}} <=> keys %{$done{$b}} } @path;
+    my $more = pop @p;		# path with most expires
+    my $less = shift @p;	# path with least expires
+    my $exp = scalar keys %{$done{$where{$move}}};
+    print "\t" x $n{$where{$move}}, $move, "\t$where{$move}\t$exp\n";
+    unless ($where{$move} eq $more) {
+	$done{$where{$move}}{$move}++;
+	next;
+    }
+    if ((keys %{$done{$more}}) - (keys %{$done{$less}}) < 3) {
+	$done{$more}{$move}++;	# close, keep it here
+	next;
+    }
     my $code = &move($more, $less, $move, '<'); # move expiring file
     $code < 0 and last;		# bail out on copy error
-    $code > 0 or next;		# keep going on file skip
-    push @{$exp{$less}}, $move;	# record the move to new disk
+    $code > 0 or ++$done{$more}{$move} and next; # keep going on file skip
+    $done{$less}{$move}++;	# record the move to new disk
 
     $opt{notrade} and next;
 
@@ -105,13 +103,18 @@ sub move {		 # -1 = copy error, 0 = skip, 1 = copy success
     	$free{$src} += $size{$file};
     	$free = $free{$dst} -= $size{$file};
     }
+    if ($opt{free} and $free < $opt{free} * $GB) {
+	printf "skipping %.3f GB $file since %.3f < --free $opt{free} on $dst | %s\n",
+	$size{$file} / $GB, $free / $GB, $title{$file};
+	return 0;
+    }
     if ($size{$file} > $free * $MAX) { # file too big?
 	printf "skipping %.3f GB $file > %.3f * $MAX free on $dst | %s\n",
 	$size{$file} / $GB, $free / $GB, $title{$file};
 	return 0;
     }
     printf "$which %7.3f $file: $src -> $dst %6.3f %4d $which %s\n",
-    $size{$file} / $GB, $free / $GB, scalar(@{$exp{$dst}}), $title{$file};
+    $size{$file} / $GB, $free / $GB, scalar(keys %{$done{$dst}}), $title{$file};
 
     my @src = glob "$src/${file}*"; # list includes thumbnails
     my @cmd = (@copy, @src, "$dst/");
