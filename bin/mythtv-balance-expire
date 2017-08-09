@@ -3,23 +3,22 @@
 # mythtv-balance-expire by twitham@sbcglobal.net, 2017-02-18
 
 # All disks must have expiring recordings, ideally from the full range
-# of recorded time.  This distributes expirable recordings evenly over
-# all disks over time.  By default it trades for the keeper of closest
-# size - ideal for full disks (use --notrade when adding new disks).
-# Assumptions: all files are local.  Tested with 2 local disks but
-# should work with any amount.
+# of recorded time so that only oldest recordings are expired.  This
+# distributes expirable recordings evenly over all disks and time.  If
+# a move makes a disk fuller than the last, then a swap with a keeper
+# of closest size is done to keep balanced headroom.  Assumptions: all
+# files are local.  Tested with 2 disks but should work with any.
 
 use warnings;
 use MythTV;
 use Getopt::Long;
 
 my $usage = "usage: $0 [options]
---notrade	only move expires, with no trade (use for new disks)
---free=GB	skip copies that would leave less than GB free space
+--subtitles	show moving subtitles in addition to titles
 --verbose	show the commands that would be run, or are being run:
 --go		actually do the moves, else just show what would be done
 ";
-GetOptions(\%opt, qw(go verbose notrade free=i)) or die $usage;
+GetOptions(\%opt, qw(go verbose subtitles)) or die $usage;
 
 # How to copy the files.  If successful, originals are unlinked
 my @copy = qw/ionice -n 7 nice rsync -a/; # must exit 0 on success only
@@ -32,10 +31,11 @@ my $GB = $MB * $KB;
 my @exp;			# ordered expiring basenames
 my %keep;			# {dir}{keeping basenames}
 my %size;			# {basename} = bytes in file
-my %title;			# {basename} = "title / subtitle"
+my %title;			# {basename} = title [/ subtitle]
 my %moved;			# {dir} = bytes moved per disk
 my %where;			# {basename} = dir
 my %done;			# {dir}{basename} final locations
+my %free;			# {dir} = bytes free on disk
 
 my $myth = new MythTV();   # we'll keep expires in chronological order:
 my %rows = $myth->backend_rows('QUERY_RECORDINGS Ascending');
@@ -48,29 +48,33 @@ foreach my $row (@{$rows{'rows'}}) { # gather status and location of shows
     $dir =~ m@/@ or next;	# only old files in a local path
     $show->{lastmodified} < $RECENT or next;
     $size{$key} = $show->{filesize};
-    $title{$key} = "$show->{title} / $show->{subtitle}";
+    $title{$key} = $show->{title};
+    $opt{subtitles} and $title{$key} .= " / $show->{subtitle}";
     $where{$key} = $dir;
-    $done{$dir} or $done{$dir} = {};
     $show->{auto_expire} ? push @exp, $key : $keep{$dir}{$key}++;
+    $done{$dir} or $done{$dir} = { one => 1 };
 }
 
-my $n = my @path = sort keys %done; # storage paths found
-$n > 1 or die "need 2 or more paths to balance, found: @path\n";
-$n = 1;
-map { $n{$_} = $n++ } @path;
+my @path = sort keys %done;	# storage paths found
+@path > 1 or die "need 2 or more paths to balance, found: @path\n";
+my $n = 1;
+for my $dir (@path) {		# per-disk metrics
+    $n{$dir} = $n++;		# disk number, for indent columns
+    $free{$dir} = &free($dir) * $KB; # bytes free, updated by &move
+}
 
-for my $move (@exp) {
+for my $move (@exp) {		# expirables in time order
     my @p = sort { keys %{$done{$a}} <=> keys %{$done{$b}} } @path;
     my $more = pop @p;		# path with most expires
     my $less = shift @p;	# path with least expires
     my $exp = scalar keys %{$done{$where{$move}}};
     print "\t" x $n{$where{$move}}, $move, "\t$where{$move}\t$exp\n";
-    unless ($where{$move} eq $more) {
+    unless ($where{$move} eq $more) { # keep it here if not path of most
 	$done{$where{$move}}{$move}++;
 	next;
     }
-    if ((keys %{$done{$more}}) - (keys %{$done{$less}}) < 3) {
-	$done{$more}{$move}++;	# close, keep it here
+    if ((keys %{$done{$more}}) - (keys %{$done{$less}}) < 2) {
+	$done{$more}{$move}++;	# balanced, keep it here
 	next;
     }
     my $code = &move($more, $less, $move, '<'); # move expiring file
@@ -78,15 +82,16 @@ for my $move (@exp) {
     $code > 0 or ++$done{$more}{$move} and next; # keep going on file skip
     $done{$less}{$move}++;	# record the move to new disk
 
-    $opt{notrade} and next;
+    # auto-balance uneven disks by deciding if keeper trade is needed
+    int($free{$less} / $GB) >= int($free{$more} / $GB) and next;
 
     # trade keeper file closest to sum moved bytes for this disk
     my $find = $moved{$less};	# global sum is set by &move below
     my $swap = (sort { abs($size{$a} - $find) <=>
 			   abs($size{$b} - $find) } keys %{$keep{$less}})[0];
     $swap or
-	print "nothing left to swap, exiting\n"
-	and last;
+	print "no file available for swap, continuing\n"
+	and next;
     $code = &move($less, $more, $swap, '>'); # move keeper file
     $code < 1 and last;
     $keep{$more}{$swap}++; delete $keep{$less}{$swap}; # record move
@@ -96,22 +101,18 @@ $opt{go} or
 
 sub move {		 # -1 = copy error, 0 = skip, 1 = copy success
     my($src, $dst, $file, $which) = @_;
-    my $free = &free($dst) * $KB; # actual disk headrooms
-    unless ($opt{go}) {		  # estimated disk headrooms
-    	$free{$dst} ||= $free;
-    	$free{$src} ||= &free($src) * $KB;
-    	$free{$src} += $size{$file};
-    	$free = $free{$dst} -= $size{$file};
-    }
-    if ($opt{free} and $free < $opt{free} * $GB) {
-	printf "skipping %.3f GB $file since %.3f < --free $opt{free} on $dst | %s\n",
-	$size{$file} / $GB, $free / $GB, $title{$file};
-	return 0;
-    }
+    my $free = $free{$dst};
     if ($size{$file} > $free * $MAX) { # file too big?
 	printf "skipping %.3f GB $file > %.3f * $MAX free on $dst | %s\n",
 	$size{$file} / $GB, $free / $GB, $title{$file};
 	return 0;
+    }
+    if ($opt{go}) {		# actual disk headrooms
+	$free{$src} = &free($src) * $KB;
+	$free{$dst} = &free($dst) * $KB;
+    } else {			# estimated disk headrooms
+	$free{$src} += $size{$file};
+	$free{$dst} -= $size{$file};
     }
     printf "$which %7.3f $file: $src -> $dst %6.3f %4d $which %s\n",
     $size{$file} / $GB, $free / $GB, scalar(keys %{$done{$dst}}), $title{$file};
@@ -126,6 +127,7 @@ sub move {		 # -1 = copy error, 0 = skip, 1 = copy success
 	map { unlink $_ or warn "could not unlink $_: $!\n" } @src;
     }
     $moved{$src} -= $size{$file}; # global: sum bytes moved per disk
+    $moved{$src} < 0 and $moved{$src} = 0;
     $moved{$dst} += $size{$file};
     return 1;			# only if copy successful
 }
