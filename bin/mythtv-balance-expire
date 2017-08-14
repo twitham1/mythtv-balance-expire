@@ -36,9 +36,8 @@ my @exp;			# ordered expiring basenames
 my %keep;			# {dir}{keeping basenames}
 my %size;			# {basename} = bytes in file
 my %title;			# {basename} = title [/ subtitle]
-my %moved;			# {dir} = bytes moved per disk
 my %where;			# {basename} = dir
-my %done;			# {dir}{basename} final locations
+my %done;			# {dir}{basename} = 1, final locations
 my %free;			# {dir} = bytes free on disk
 my %count = qw/< 0 > 0/;	# {type} = count of moves
 
@@ -90,8 +89,8 @@ for my $move (@exp) {		# expirables in time order
     # auto-balance uneven disks by deciding if keeper trade is needed
     int($free{$less} / $GB) >= int($free{$more} / $GB) and next;
 
-    # trade keeper file closest to sum moved bytes for this disk
-    my $find = $moved{$less};	# global sum is set by &move below
+    # trade keeper file of closest size
+    my $find = $size{$move};
     my $swap = (sort { abs($size{$a} - $find) <=>
 			   abs($size{$b} - $find) } keys %{$keep{$less}})[0];
     $swap or
@@ -132,9 +131,6 @@ sub move {		 # -1 = copy error, 0 = skip, 1 = copy success
 	    and return -1;
 	map { unlink $_ or warn "could not unlink $_: $!\n" } @src;
     }
-    $moved{$src} -= $size{$file}; # global: sum bytes moved per disk
-    $moved{$src} < 0 and $moved{$src} = 0;
-    $moved{$dst} += $size{$file};
     $count{$which}++;
     return 1;			# only if copy successful
 }
