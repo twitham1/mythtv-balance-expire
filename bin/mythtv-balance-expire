@@ -61,7 +61,7 @@ foreach my $row (@{$rows{'rows'}}) { # gather status and location of shows
 
 my @path = sort keys %done;	# storage paths found
 @path > 1 or die "need 2 or more paths to balance, found: @path\n";
-my $n = 1;
+my $n = 0;
 for my $dir (@path) {		# per-disk metrics
     $n{$dir} = $n++;		# disk number, for indent columns
     $free{$dir} = &free($dir) * $KB; # bytes free, updated by &move
@@ -72,7 +72,7 @@ for my $move (@exp) {		# expirables in time order
     my $more = pop @p;		# path with most expires
     my $less = shift @p;	# path with least expires
     my $exp = scalar keys %{$done{$where{$move}}};
-    print "\t" x $n{$where{$move}}, $move, "\t$where{$move}\t$exp\n";
+    print "\t" x $n{$where{$move}}, "$exp\t$move\t$where{$move}\n";
     unless ($where{$move} eq $more) { # keep it here if not path of most
 	$done{$where{$move}}{$move}++;
 	next;
