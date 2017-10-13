@@ -33,11 +33,11 @@ my $KB = 1024;
 my $MB = $KB * $KB;
 my $GB = $MB * $KB;
 my @exp;			# ordered expiring basenames
+my %exp;			# {dir}{expiring basenames}
 my %keep;			# {dir}{keeping basenames}
 my %size;			# {basename} = bytes in file
 my %title;			# {basename} = title [/ subtitle]
 my %where;			# {basename} = dir
-my %done;			# {dir}{basename} = 1, final locations
 my %free;			# {dir} = bytes free on disk
 my %count = qw/< 0 > 0/;	# {type} = count of moves
 
@@ -56,10 +56,10 @@ foreach my $row (@{$rows{'rows'}}) { # gather status and location of shows
     $opt{subtitles} and $title{$key} .= " / $show->{subtitle}";
     $where{$key} = $dir;
     $show->{auto_expire} ? push @exp, $key : $keep{$dir}{$key}++;
-    $done{$dir} or $done{$dir} = { one => 1 };
+    $exp{$dir} or $exp{$dir} = { one => 1 };
 }
 
-my @path = sort keys %done;	# storage paths found
+my @path = sort keys %exp;	# storage paths found
 @path > 1 or die "need 2 or more paths to balance, found: @path\n";
 my $n = 0;
 for my $dir (@path) {		# per-disk metrics
@@ -68,23 +68,23 @@ for my $dir (@path) {		# per-disk metrics
 }
 
 for my $move (@exp) {		# expirables in time order
-    my @p = sort { keys %{$done{$a}} <=> keys %{$done{$b}} } @path;
+    my @p = sort { keys %{$exp{$a}} <=> keys %{$exp{$b}} } @path;
     my $more = pop @p;		# path with most expires
     my $less = shift @p;	# path with least expires
-    my $exp = scalar keys %{$done{$where{$move}}};
+    my $exp = scalar keys %{$exp{$where{$move}}};
     print "\t" x $n{$where{$move}}, "$exp\t$move\t$where{$move}\n";
     unless ($where{$move} eq $more) { # keep it here if not path of most
-	$done{$where{$move}}{$move}++;
+	$exp{$where{$move}}{$move}++;
 	next;
     }
-    if ((keys %{$done{$more}}) - (keys %{$done{$less}}) < $opt{delta}) {
-	$done{$more}{$move}++;	# balanced, keep it here
+    if ((keys %{$exp{$more}}) - (keys %{$exp{$less}}) < $opt{delta}) {
+	$exp{$more}{$move}++;	# balanced, keep it here
 	next;
     }
     my $code = &move($more, $less, $move, '<'); # move expiring file
     $code < 0 and last;		# bail out on copy error
-    $code > 0 or ++$done{$more}{$move} and next; # keep going on file skip
-    $done{$less}{$move}++;	# record the move to new disk
+    $code > 0 or ++$exp{$more}{$move} and next; # keep going on file skip
+    $exp{$less}{$move}++;	# record the move to new disk
 
     # auto-balance uneven disks by deciding if keeper trade is needed
     int($free{$less} / $GB) >= int($free{$more} / $GB) and next;
@@ -100,9 +100,18 @@ for my $move (@exp) {		# expirables in time order
     $code < 1 and last;
     $keep{$more}{$swap}++; delete $keep{$less}{$swap}; # record move
 }
+for my $dir (sort keys %exp) {	# results summary footer
+    my $e = keys %{$exp{$dir}};
+    my $k = keys %{$keep{$dir}};
+    my $t = $e + $k;
+    my $T = keys %size;
+    printf "SUMMARY <<<%5d/%3.0f%% expires<<< + >>>%5d/%3.0f%% keepers>>>"
+	. " = %5d/%3.0f%% on %s\n",
+	$e, $e / $t * 100, $k, $k / $t * 100, $t, $t / $T * 100, $dir;
+}
 $opt{go} or
-    print "NOTHING DONE!  Add --go to actually move <",
-    $count{'<'}, " expires< and >", $count{'>'}, " keepers>.\n";
+    print "NOTHING DONE!  Add --go to actually move <<<",
+    $count{'<'}, " expires<<< and >>>", $count{'>'}, " keepers>>>.\n";
 
 sub move {		 # -1 = copy error, 0 = skip, 1 = copy success
     my($src, $dst, $file, $which) = @_;
@@ -120,7 +129,7 @@ sub move {		 # -1 = copy error, 0 = skip, 1 = copy success
 	$free{$dst} -= $size{$file};
     }
     printf "$which %7.3f $file: $src -> $dst %4d %7.3f $which %s\n",
-    $size{$file} / $GB, scalar(keys %{$done{$dst}}), $free / $GB, $title{$file};
+    $size{$file} / $GB, scalar(keys %{$exp{$dst}}), $free / $GB, $title{$file};
 
     my @src = glob "$src/${file}*"; # list includes thumbnails
     my @cmd = (@copy, @src, "$dst/");
