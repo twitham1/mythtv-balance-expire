@@ -7,7 +7,7 @@
 # distributes expirable recordings evenly over all disks and time.  If
 # a move makes a disk fuller than the last, then a swap with a keeper
 # of closest size is done to keep balanced headroom.  Assumptions: all
-# files are local.  Tested with 2 disks but should work with any.
+# files are local.  Tested with 2 disks but should work with many.
 
 use warnings;
 use MythTV;
@@ -105,13 +105,12 @@ for my $dir (sort keys %exp) {	# results summary footer
     my $k = keys %{$keep{$dir}};
     my $t = $e + $k;
     my $T = keys %size;
-    printf "SUMMARY <<<%5d/%3.0f%% expires<<< + >>>%5d/%3.0f%% keepers>>>"
+    printf "SUMMARY <<<%5d/%3.0f%% expires <<< + >>>%5d/%3.0f%% keepers >>>"
 	. " = %5d/%3.0f%% on %s\n",
 	$e, $e / $t * 100, $k, $k / $t * 100, $t, $t / $T * 100, $dir;
 }
-$opt{go} or
-    print "NOTHING DONE!  Add --go to actually move <<<",
-    $count{'<'}, " expires<<< and >>>", $count{'>'}, " keepers>>>.\n";
+print $opt{go} ? "MOVED:  <<< " : "NOTHING DONE!  Add --go to actually move <<< ";
+print $count{'<'}, " expires <<< and >>> ", $count{'>'}, " keepers >>>.\n";
 
 sub move {		 # -1 = copy error, 0 = skip, 1 = copy success
     my($src, $dst, $file, $which) = @_;
