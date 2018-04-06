@@ -154,8 +154,8 @@ mythtv-balance-expire - trade recordings to balance multiple disks
 
 =head1 SYNOPSIS
 
- mythtv-balance-expire [options]
-    --help	show brief usage and exit
+ mythtv-balance-expire [--help] [--man] [--delta N] [--verbose] [--go]
+    --help	show brief usage of all options and exit
     --man	show the full manual and exit
 
 =head1 DESCRIPTION
@@ -263,15 +263,15 @@ Append subtitles to titles of moving files.
 =item B<--verbose>
 
 Shows the commands that will be run, or are being run with B<--go>.
-If STDIN is a terminal, then L<rsync(1)> will use its B<--progress>
+If STDIN is a terminal, then rsync(1) will use its B<--progress>
 option to show copy progress, even without this B<--verbose>.
 
 =item B<--go>
 
-Actually do the file moves with L<rsync(1)>, removing the original
-only if successful.  This requires write permission to the local
-recording directories so you must be root or mythtv on the server.  If
-this option is not given, then no actions are taken.
+Actually do the file moves with rsync(1), removing the original only
+if successful.  This requires write permission to the local recording
+directories so you must be root or mythtv on the server.  If this
+option is not given, then no actions are taken.
 
 =back
 
@@ -279,7 +279,7 @@ this option is not given, then no actions are taken.
 
 You must have ~/.mythtv/config.xml configured to read your database
 and must be root or mythtv on the server for write permission to move
-the files.  As shown in B<--verbose>, L<rsync(1)> is required.
+the files.  As shown in B<--verbose>, rsync(1) is required.
 
 Still TODO: move younger expires if no keepers are available.
 
