@@ -12,17 +12,13 @@
 use warnings;
 use MythTV;
 use Getopt::Long;
+use Pod::Usage;
 
 my %opt = (delta => 5);	       # lower = better balance but more moves
-my $usage = "usage: $0 [options]
---delta=N	expiring count delta allowed between disks [$opt{delta}]
-		lower = better balance, higher = less moves
-	hint: --delta 9999 to see current expiring balance w/no moves
---subtitles	add subtitles to titles of moving files
---verbose	show the commands that would be run, or are being run:
---go		actually do the moves, else just show what would be done
-";
-GetOptions(\%opt, qw(delta=i subtitles verbose go)) or die $usage;
+GetOptions(\%opt, qw(help|? man delta=i subtitles verbose go))
+    or pod2usage(2);
+pod2usage(1) if $opt{help};
+pod2usage(-verbose => 2) if $opt{man};
 
 # How to copy the files.  If successful, originals are unlinked
 my @copy = qw/ionice -n 7 nice rsync -a/; # must exit 0 on success only
@@ -150,3 +146,152 @@ sub df {			# df of $file in KB
     my @out = split "\n", `df -k $file`;
     return split /\s+/, $out[-1];
 }
+__END__
+
+=head1 NAME
+
+mythtv-balance-expire - trade recordings to balance multiple disks
+
+=head1 SYNOPSIS
+
+ mythtv-balance-expire [options]
+    --help	show brief usage and exit
+    --man	show the full manual and exit
+
+=head1 DESCRIPTION
+
+B<mythtv-balance-expire> trades recording files between multiple local
+disks in a mythtv server to better balance the files over recorded
+time.  Why would you want to do this you ask?
+
+Say you have 6 months of recordings but your disk is full so you add
+another.  The new disk now gets most new recordings since it has more
+free space.  6 months later both are full and recording new shows.
+But the original disk is now expiring files from 1 year ago while the
+new disk is expiring files only 6 months old.  Mythtv's auto-expire
+list leads you to believe you have a year of recordings but this is
+misleading since the new disk must expire shows much younger since it
+has no older shows.
+
+Or, say you have a small disk and a large one, both full and recording
+via auto-expire.  And you disable auto-expire on shows you really want
+to see someday to make sure you don't lose them to auto-expire.  If
+you save a significant amount of shows this way, you can eventually
+have the small drive nearly full of saved files.  So the auto-expire
+to record a new show is from just a few days ago, even if the large
+disk is expiring shows over a year old!
+
+So, what you really need is for all disks to hold a similar amount of
+the oldest expiring files.  B<This does that> by moving recordings
+among the disks.
+
+=head2 Usage and output
+
+Run with no arguments.  This will take no actions and just show the
+current [im]balance of expiring recordings.
+
+The output shows expiring recordings in time sorted order.  Lines are
+indented per disk, so each "column" is a different disk.  The lines
+look like:
+
+	NNN	CHAN_YYYYMMDDHHMMSS.mpg /path/to/recording
+
+=over 4
+
+=item B<NNN>
+
+Number of expiring files on this recording path
+
+=item B<CHAN_YYYYMMDDHHMMSS.mpg>
+
+Recording file name: channel, time stamp and file extension
+
+=item B</path/to/recording>
+
+Current path to the recording file
+
+=back
+
+Suggested moves are shown when a file should move to produce a better
+balance.  These lines look like this:
+
+	< GB expirefile /too/many/path -> /too/few/path XXX free < title
+	> GB keeperfile /too/few/path -> /too/many/path YYY free > title
+
+The expiring file is delimited by < and shown with its size in
+Gigabytes.  It should move from the path with too many to the path
+with too few as shown by the arrow.  The resulting file count and free
+space of the destination location is shown.  Finally the title (and
+optionally B<--subtitle>) of the moving file is displayed.
+
+A file with auto-expire disabled (a permanent keeper file) will often
+need to be traded.  This keeper file is delimited by >.  It is
+selected by size closest to the expiring file to minimize headroom
+change on the disks.  When balancing to a disk with more free space,
+no trade is needed.
+
+A footer is provided which shows the end state of each disk if these
+file moves are done.  A notice is given if nothing has actually
+happened yet, see B<--go>.
+
+If the suggested moves look correct, you can add B<--verbose> to see
+the commands that will be run.  For the successful copies, the
+original location will be removed.  If this still looks good, simply
+add B<--go> to actually do the given file moves.  When using B<--go>
+you must be root or the owner of the recording directories (mythtv) so
+that you have permission to move the files.
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<--delta N>
+
+Require each disk's expiring file count over time to be within N of
+all other disks.  If a disk has > N more files than another, this
+triggers a file move to maintain this delta <= N.  Lower values
+produce a better balance while higher values need less moves.  You can
+manipulate this value to see how many moves will be required and how
+they will affect disk headroom, before deciding to use B<--go>.  A
+high value like 9999 will simply show the current [im]balance with no
+moves.  The default delta is 5.
+
+=item B<--subtitles>
+
+Append subtitles to titles of moving files.
+
+=item B<--verbose>
+
+Shows the commands that will be run, or are being run with B<--go>.
+If STDIN is a terminal, then L<rsync(1)> will use its B<--progress>
+option to show copy progress, even without this B<--verbose>.
+
+=item B<--go>
+
+Actually do the file moves with L<rsync(1)>, removing the original
+only if successful.  This requires write permission to the local
+recording directories so you must be root or mythtv on the server.  If
+this option is not given, then no actions are taken.
+
+=back
+
+=head1 CAVEATS
+
+You must have ~/.mythtv/config.xml configured to read your database
+and must be root or mythtv on the server for write permission to move
+the files.  As shown in B<--verbose>, L<rsync(1)> is required.
+
+Still TODO: move younger expires if no keepers are available.
+
+=head1 COPYRIGHT
+
+Copyright 2017-2018 Timothy D Witham.
+
+This program is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself.
+
+=head1 AUTHOR
+
+Timothy D Witham <twitham@sbcglobal.net>
+
+=cut
