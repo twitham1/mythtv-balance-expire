@@ -6,7 +6,7 @@
 # of recorded time so that only oldest recordings are expired.  This
 # distributes expirable recordings evenly over all disks and time.  If
 # a move makes a disk fuller than the last, then a swap with a keeper
-# of closest size is done to keep balanced headroom.  Assumptions: all
+# of closest size is done to keep similar headroom.  Assumptions: all
 # files are local.  Tested with 2 disks but should work with many.
 
 use warnings;
@@ -15,7 +15,7 @@ use Getopt::Long;
 use Pod::Usage;
 
 my %opt = (delta => 5);	       # lower = better balance but more moves
-GetOptions(\%opt, qw(help|? man delta=i subtitles verbose go))
+GetOptions(\%opt, qw(help|? man delta=i subtitles verbose go keepers=i))
     or pod2usage(2);
 pod2usage(1) if $opt{help};
 pod2usage(-verbose => 2) if $opt{man};
@@ -40,7 +40,10 @@ my %count = qw/< 0 > 0/;	# {type} = count of moves
 my $myth = new MythTV();   # we'll keep expires in chronological order:
 my %rows = $myth->backend_rows('QUERY_RECORDINGS Ascending');
 
-foreach my $row (@{$rows{'rows'}}) { # gather status and location of shows
+# UNDOCUMENTED: ignore DB and pretend X % are keepers (for dev/testing)
+defined $opt{keepers} and $opt{go} = 0;
+
+foreach my $row (@{$rows{rows}}) { # gather status and location of shows
     my $show = $myth->new_recording(@$row);
     my $key = $show->{basename};
     my $path = $show->{local_path};
@@ -51,6 +54,8 @@ foreach my $row (@{$rows{'rows'}}) { # gather status and location of shows
     $title{$key} = $show->{title};
     $opt{subtitles} and $title{$key} .= " / $show->{subtitle}";
     $where{$key} = $dir;
+    defined $opt{keepers} and  # UNDOCUMENTED: pretend X % are keepers
+	$show->{auto_expire} = rand(100) > $opt{keepers} ? 1 : 0;
     $show->{auto_expire} ? push @exp, $key : $keep{$dir}{$key}++;
     $exp{$dir} or $exp{$dir} = { one => 1 };
 }
@@ -63,7 +68,7 @@ for my $dir (@path) {		# per-disk metrics
     $free{$dir} = &free($dir) * $KB; # bytes free, updated by &move
 }
 
-for my $move (@exp) {		# expirables in time order
+while (my $move = shift @exp) {	# expirables in time order
     my @p = sort { keys %{$exp{$a}} <=> keys %{$exp{$b}} } @path;
     my $more = pop @p;		# path with most expires
     my $less = shift @p;	# path with least expires
@@ -73,7 +78,8 @@ for my $move (@exp) {		# expirables in time order
 	$exp{$where{$move}}{$move}++;
 	next;
     }
-    if ((keys %{$exp{$more}}) - (keys %{$exp{$less}}) < $opt{delta}) {
+    if ($moved{$move} or	# move files only once
+	(keys %{$exp{$more}}) - (keys %{$exp{$less}}) < $opt{delta}) {
 	$exp{$more}{$move}++;	# balanced, keep it here
 	next;
     }
@@ -85,16 +91,26 @@ for my $move (@exp) {		# expirables in time order
     # auto-balance uneven disks by deciding if keeper trade is needed
     int($free{$less} / $GB) >= int($free{$more} / $GB) and next;
 
-    # trade keeper file of closest size
+    # trade keeper file or future expire of closest size
+    my $which = '>';		# keepers first
     my $find = $size{$move};
     my $swap = (sort { abs($size{$a} - $find) <=>
 			   abs($size{$b} - $find) } keys %{$keep{$less}})[0];
+    $swap or			# use younger expires if no keepers
+	$swap = (sort { abs($size{$a} - $find) <=>
+			    abs($size{$b} - $find) }
+		 grep { $where{$_} eq $less } @exp)[0] and $which = '<';
     $swap or
 	print "no file available for swap, continuing\n"
 	and next;
-    $code = &move($less, $more, $swap, '>'); # move keeper file
-    $code < 1 and last;
-    $keep{$more}{$swap}++; delete $keep{$less}{$swap}; # record move
+    $code = &move($less, $more, $swap, $which); # move swapper file
+    $code < 0 and last;
+    if ($which eq '>') {	# record the move
+	$keep{$more}{$swap}++; delete $keep{$less}{$swap};
+    } else {
+	$where{$swap} = $more;
+    }
+    $moved{$swap}++;
 }
 for my $dir (sort keys %exp) {	# results summary footer
     my $e = keys %{$exp{$dir}};
@@ -105,7 +121,8 @@ for my $dir (sort keys %exp) {	# results summary footer
 	. " = %5d/%3.0f%% on %s\n",
 	$e, $e / $t * 100, $k, $k / $t * 100, $t, $t / $T * 100, $dir;
 }
-print $opt{go} ? "MOVED:  <<< " : "NOTHING DONE!  Add --go to actually move <<< ";
+print $opt{go} ? "MOVED:  <<< "
+    : "NOTHING DONE!  Add --go to actually move <<< ";
 print $count{'<'}, " expires <<< and >>> ", $count{'>'}, " keepers >>>.\n";
 
 sub move {		 # -1 = copy error, 0 = skip, 1 = copy success
@@ -150,12 +167,12 @@ __END__
 
 =head1 NAME
 
-mythtv-balance-expire - trade recordings to balance multiple disks
+mythtv-balance-expire - move recording files to balance multiple disks
 
 =head1 SYNOPSIS
 
- mythtv-balance-expire [--help] [--man] [--delta N] [--verbose] [--go]
-    --help	show brief usage of all options and exit
+ mythtv-balance-expire [--help | --man] [--delta N] [--verbose] [--go]
+    --help	show usage of all options and exit
     --man	show the full manual and exit
 
 =head1 DESCRIPTION
@@ -182,8 +199,8 @@ to record a new show is from just a few days ago, even if the large
 disk is expiring shows over a year old!
 
 So, what you really need is for all disks to hold a similar amount of
-the oldest expiring files.  B<This does that> by moving recordings
-among the disks.
+oldest expiring files.  B<This does that> by moving recordings among
+the disks.
 
 =head2 Usage and output
 
@@ -219,20 +236,22 @@ balance.  These lines look like this:
 	> GB keeperfile /too/few/path -> /too/many/path YYY free > title
 
 The expiring file is delimited by < and shown with its size in
-Gigabytes.  It should move from the path with too many to the path
-with too few as shown by the arrow.  The resulting file count and free
-space of the destination location is shown.  Finally the title (and
-optionally B<--subtitle>) of the moving file is displayed.
+Gigabytes.  It should move from the left path with too many to the
+right path with too few as shown by the arrow.  The resulting file
+count and free space of the destination location is shown.  Finally
+the title (and optionally B<--subtitle>) of the moving file is
+displayed.
 
-A file with auto-expire disabled (a permanent keeper file) will often
-need to be traded.  This keeper file is delimited by >.  It is
-selected by size closest to the expiring file to minimize headroom
-change on the disks.  When balancing to a disk with more free space,
-no trade is needed.
+If the destination is now more full than the source, a trade is made.
+A file with auto-expire disabled (a permanent "keeper" file) is
+preferred.  This keeper file is delimited by >.  It is selected by
+size closest to the expiring file to minimize headroom change on the
+disks.  If no keepers are left, then a future expiring file is used
+for trade instead.  When balancing to a disk with more free space, no
+trade is needed.
 
-A footer is provided which shows the end state of each disk if these
-file moves are done.  A notice is given if nothing has actually
-happened yet, see B<--go>.
+A footer is provided which shows the end state of each disk.  A notice
+is given if nothing has actually happened yet, see B<--go>.
 
 If the suggested moves look correct, you can add B<--verbose> to see
 the commands that will be run.  For the successful copies, the
@@ -281,7 +300,14 @@ You must have ~/.mythtv/config.xml configured to read your database
 and must be root or mythtv on the server for write permission to move
 the files.  As shown in B<--verbose>, rsync(1) is required.
 
-Still TODO: move younger expires if no keepers are available.
+Of course moving dozens of files will take a while, so be patient when
+using B<--go>.  Rsync(1) --progress is shown on the terminal.
+
+If your disks are different sizes, it may not be possible to balance
+recent time.  This is normal - you will balance that time later when
+you run this again in the future.  In fact, it is a good idea to run
+this periodically; I do so once a month.  If you really trust it, you
+might cron(1) it with redirection to a log file.
 
 =head1 COPYRIGHT
 
