@@ -5,9 +5,9 @@
 # All disks must have expiring recordings, ideally from the full range
 # of recorded time so that each disk expires only oldest recordings.
 # This distributes expirable recordings evenly over all disks and
-# time.  If a move makes a disk fuller than the last, then a swap with
-# a keeper is done to keep similar disk headroom.  Assumptions: all
-# files are local.  Tested with 2 disks but should work with many.
+# time.  If a move makes a disk fuller than the last, then a trade
+# with a keeper is done to keep similar disk headroom.  Assumptions:
+# all files are local.  Tested with 2 disks but should work with many.
 
 use warnings;
 use MythTV;
@@ -25,6 +25,7 @@ my @copy = qw/ionice -n 7 nice rsync -a/; # must exit 0 on success only
 push @copy, '--progress' if -t STDIN;
 my $RECENT = time - 3 * 24 * 60 * 60; # don't move recent files
 my $MAX = 0.5;			# maximum free space to use for copies
+my $MIN = 2.0;			# minimum disk headroom in GB
 my $KB = 1024;
 my $MB = $KB * $KB;
 my $GB = $MB * $KB;
@@ -93,7 +94,7 @@ while (my $move = shift @exp) {	# expirables in time order
 
     # trade keeper file or future expire of best size to balance headroom
     my $which = '>';		# keepers first
-    my $find = $free{$more} - $free{$less};
+    my $find = ($free{$more} - $free{$less}) / 2;
     my $swap = (sort { abs($size{$a} - $find) <=>
 			   abs($size{$b} - $find) } keys %{$keep{$less}})[0];
     $swap or			# use younger expires if no keepers
@@ -101,7 +102,7 @@ while (my $move = shift @exp) {	# expirables in time order
 			    abs($size{$b} - $find) }
 		 grep { $where{$_} eq $less } @exp)[0] and $which = '<';
     $swap or
-	print "no file available for swap, continuing\n"
+	print "no file available for trade, continuing\n"
 	and next;
     $code = &move($less, $more, $swap, $which); # move swapper file
     $code < 0 and last;
@@ -129,8 +130,9 @@ print $count{'<'}, " expires <<< and >>> ", $count{'>'}, " keepers >>>.\n";
 sub move {		 # -1 = copy error, 0 = skip, 1 = copy success
     my($src, $dst, $file, $which) = @_;
     my $free = $free{$dst};
-    if ($size{$file} > $free * $MAX) { # file too big?
-	printf "skipping %.3f GB $file > %.3f * $MAX free on $dst\n",
+    if (($free - $size{$file}) / $GB < $MIN or
+	$size{$file} > $free * $MAX) { # file too big?
+	printf "skipping %.3f GB $file, %.3f free on $dst\n",
 	$size{$file} / $GB, $free / $GB;
 	return 0;
     }
@@ -303,11 +305,15 @@ the files.  As shown in B<--verbose>, rsync(1) is required.
 Of course moving dozens of files will take a long time, so be patient
 when using B<--go>.  Rsync(1) --progress is shown on the terminal.
 
+This does not update the database at all.  Mythtv will automatically
+discover the new locations of the recordings.  Allow time for this to
+happen between B<--go> runs.
+
 If your disks are different sizes, it may not be possible to balance
 recent time.  This is normal - you will balance that time later when
 you run this again in the future.  In fact, it is a good idea to run
-this periodically; I do so once a month.  If you really trust it, you
-might cron(1) it with redirection to a log file.
+this periodically; I do so once a month.  If you really trust the
+actions, you might cron(1) this with redirection to a log file.
 
 =head1 COPYRIGHT
 
