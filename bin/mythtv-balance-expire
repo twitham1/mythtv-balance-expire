@@ -3,10 +3,10 @@
 # mythtv-balance-expire by twitham@sbcglobal.net, 2017-02-18
 
 # All disks must have expiring recordings, ideally from the full range
-# of recorded time so that only oldest recordings are expired.  This
-# distributes expirable recordings evenly over all disks and time.  If
-# a move makes a disk fuller than the last, then a swap with a keeper
-# of closest size is done to keep similar headroom.  Assumptions: all
+# of recorded time so that each disk expires only oldest recordings.
+# This distributes expirable recordings evenly over all disks and
+# time.  If a move makes a disk fuller than the last, then a swap with
+# a keeper is done to keep similar disk headroom.  Assumptions: all
 # files are local.  Tested with 2 disks but should work with many.
 
 use warnings;
@@ -24,7 +24,7 @@ pod2usage(-verbose => 2) if $opt{man};
 my @copy = qw/ionice -n 7 nice rsync -a/; # must exit 0 on success only
 push @copy, '--progress' if -t STDIN;
 my $RECENT = time - 3 * 24 * 60 * 60; # don't move recent files
-my $MAX = 0.7;			# maximum free space to use for copies
+my $MAX = 0.5;			# maximum free space to use for copies
 my $KB = 1024;
 my $MB = $KB * $KB;
 my $GB = $MB * $KB;
@@ -91,9 +91,9 @@ while (my $move = shift @exp) {	# expirables in time order
     # auto-balance uneven disks by deciding if keeper trade is needed
     int($free{$less} / $GB) >= int($free{$more} / $GB) and next;
 
-    # trade keeper file or future expire of closest size
+    # trade keeper file or future expire of best size to balance headroom
     my $which = '>';		# keepers first
-    my $find = $size{$move};
+    my $find = $free{$more} - $free{$less};
     my $swap = (sort { abs($size{$a} - $find) <=>
 			   abs($size{$b} - $find) } keys %{$keep{$less}})[0];
     $swap or			# use younger expires if no keepers
@@ -118,8 +118,9 @@ for my $dir (sort keys %exp) {	# results summary footer
     my $t = $e + $k;
     my $T = keys %size;
     printf "SUMMARY <<<%5d/%3.0f%% expires <<< + >>>%5d/%3.0f%% keepers >>>"
-	. " = %5d/%3.0f%% on %s\n",
-	$e, $e / $t * 100, $k, $k / $t * 100, $t, $t / $T * 100, $dir;
+	. " = %5d/%3.0f%% + %.3fGB free on %s\n",
+	$e, $e / $t * 100, $k, $k / $t * 100, $t, $t / $T * 100,
+	$free{$dir} / $GB, $dir;
 }
 print $opt{go} ? "MOVED:  <<< "
     : "NOTHING DONE!  Add --go to actually move <<< ";
@@ -129,17 +130,11 @@ sub move {		 # -1 = copy error, 0 = skip, 1 = copy success
     my($src, $dst, $file, $which) = @_;
     my $free = $free{$dst};
     if ($size{$file} > $free * $MAX) { # file too big?
-	printf "skipping %.3f GB $file > %.3f * $MAX free on $dst | %s\n",
-	$size{$file} / $GB, $free / $GB, $title{$file};
+	printf "skipping %.3f GB $file > %.3f * $MAX free on $dst\n",
+	$size{$file} / $GB, $free / $GB;
 	return 0;
     }
-    if ($opt{go}) {		# actual disk headrooms
-	$free{$src} = &free($src) * $KB;
-	$free{$dst} = &free($dst) * $KB;
-    } else {			# estimated disk headrooms
-	$free{$src} += $size{$file};
-	$free{$dst} -= $size{$file};
-    }
+    $free -= $size{$file};
     printf "$which %7.3f $file: $src -> $dst %4d %7.3f $which %s\n",
     $size{$file} / $GB, scalar(keys %{$exp{$dst}}), $free / $GB, $title{$file};
 
@@ -151,6 +146,11 @@ sub move {		 # -1 = copy error, 0 = skip, 1 = copy success
 	    or warn sprintf("exit %d from (@cmd)\n", $? >> 8)
 	    and return -1;
 	map { unlink $_ or warn "could not unlink $_: $!\n" } @src;
+	$free{$src} = &free($src) * $KB; # actual disk headrooms
+	$free{$dst} = &free($dst) * $KB;
+    } else {			# estimated disk headrooms
+	$free{$src} += $size{$file};
+	$free{$dst} -= $size{$file};
     }
     $count{$which}++;
     return 1;			# only if copy successful
@@ -205,7 +205,7 @@ the disks.
 =head2 Usage and output
 
 Run with no arguments.  This will take no actions and just show the
-current [im]balance of expiring recordings.
+expiring recordings and recommended moves.
 
 The output shows expiring recordings in time sorted order.  Lines are
 indented per disk, so each "column" is a different disk.  The lines
@@ -245,10 +245,10 @@ displayed.
 If the destination is now more full than the source, a trade is made.
 A file with auto-expire disabled (a permanent "keeper" file) is
 preferred.  This keeper file is delimited by >.  It is selected by
-size closest to the expiring file to minimize headroom change on the
-disks.  If no keepers are left, then a future expiring file is used
-for trade instead.  When balancing to a disk with more free space, no
-trade is needed.
+size that would result in closest headroom on the disks.  If no
+keepers are left, then a future expiring file is used for trade
+instead.  When balancing to a disk with more free space, no trade is
+needed.
 
 A footer is provided which shows the end state of each disk.  A notice
 is given if nothing has actually happened yet, see B<--go>.
@@ -281,9 +281,9 @@ Append subtitles to titles of moving files.
 
 =item B<--verbose>
 
-Shows the commands that will be run, or are being run with B<--go>.
-If STDIN is a terminal, then rsync(1) will use its B<--progress>
-option to show copy progress, even without this B<--verbose>.
+Show the commands that will be run, or are being run with B<--go>.  If
+STDIN is a terminal, then rsync(1) will use its B<--progress> option
+to show copy progress, even without this B<--verbose>.
 
 =item B<--go>
 
@@ -300,8 +300,8 @@ You must have ~/.mythtv/config.xml configured to read your database
 and must be root or mythtv on the server for write permission to move
 the files.  As shown in B<--verbose>, rsync(1) is required.
 
-Of course moving dozens of files will take a while, so be patient when
-using B<--go>.  Rsync(1) --progress is shown on the terminal.
+Of course moving dozens of files will take a long time, so be patient
+when using B<--go>.  Rsync(1) --progress is shown on the terminal.
 
 If your disks are different sizes, it may not be possible to balance
 recent time.  This is normal - you will balance that time later when
