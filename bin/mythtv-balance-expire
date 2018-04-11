@@ -86,6 +86,18 @@ while (my $move = shift @exp) {	# expirables in time order
 	$exp{$more}{$move}++;	# balanced, keep it here
 	next;
     }
+    # don't move to fuller disk unless full disk has larger trade
+    my $large = (sort { $size{$a} <=> $size{$b} }
+		 grep { !$moved{$_} } keys %{$keep{$less}},
+		 grep { $where{$_} eq $less } @exp)[-1];
+    if ($free{$less} < $free{$more} and
+	(!$large or $size{$large} < $size{$move})) {
+	$large ||= 'NONE'; $size{NONE} = 0;
+	printf "# largest trade $large %.3f < $move %.3f, skipping\n",
+	$size{$large} / $GB, $size{$move} / $GB;
+	$exp{$more}{$move}++;	# skipped, keep it here
+	next;
+    }
     my $code = &move($more, $less, $move, '<'); # move expiring file
     $code < 0 and last;		# bail out on copy error
     $code > 0 or ++$exp{$more}{$move} and next; # keep going on file skip
