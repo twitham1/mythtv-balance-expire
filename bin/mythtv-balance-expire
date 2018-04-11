@@ -38,7 +38,7 @@ my %size;			# {basename} = bytes in file
 my %title;			# {basename} = title [/ subtitle]
 my %where;			# {basename} = dir
 my %free;			# {dir} = bytes free on disk
-my %count = qw/< 0 > 0/;	# {type} = count of moves
+my %count = qw/< 0 > 0 GB< 0 GB> 0/; # {type} = count/size of moves
 
 my $myth = new MythTV();   # we'll keep expires in chronological order:
 my %rows = $myth->backend_rows('QUERY_RECORDINGS Ascending');
