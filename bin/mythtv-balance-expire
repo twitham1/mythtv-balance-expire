@@ -76,7 +76,8 @@ while (my $move = shift @exp) {	# expirables in time order
     my $more = pop @p;		# path with most expires
     my $less = shift @p;	# path with least expires
     my $exp = scalar keys %{$exp{$where{$move}}};
-    print "\t" x $n{$where{$move}}, "$exp\t$move\t$where{$move}\n";
+    print "\t" x $n{$where{$move}}, "$exp\t$move\t$where{$move}"
+	. ($moved{$move} ? " # moved \@ $moved{$move}\n" : "\n");
     unless ($where{$move} eq $more) { # keep it here if not path of most
 	$exp{$where{$move}}{$move}++;
 	next;
@@ -116,7 +117,7 @@ while (my $move = shift @exp) {	# expirables in time order
 			    abs($size{$b} - $find) }
 		 grep { $where{$_} eq $less } @exp)[0] and $which = '<';
     $swap or
-	print "no file available for trade, continuing\n"
+	print "# no file available for trade, continuing\n"
 	and next;
     $code = &move($less, $more, $swap, $which); # move swapper file
     $code < 0 and last;
@@ -125,10 +126,10 @@ while (my $move = shift @exp) {	# expirables in time order
     } else {
 	$where{$swap} = $more;
     }
-    $moved{$swap}++;
+    $moved{$swap} = $exp;
 }
 for my $dir (sort keys %exp) {	# results summary footer
-    my $e = keys %{$exp{$dir}};
+    my $e = (keys %{$exp{$dir}}) - 1;
     my $k = keys %{$keep{$dir}};
     my $t = $e + $k;
     my $T = keys %size;
@@ -139,14 +140,15 @@ for my $dir (sort keys %exp) {	# results summary footer
 }
 print $opt{go} ? "MOVED:  <<< "
     : "NOTHING DONE!  Add --go to actually move <<< ";
-print $count{'<'}, " expires <<< and >>> ", $count{'>'}, " keepers >>>.\n";
+printf "%d = %.3f GB expires <<< and >>> %d = %.3f GB keepers >>>.\n",
+    $count{'<'}, $count{'GB<'} / $GB, $count{'>'}, $count{'GB>'} / $GB;
 
 sub move {		 # -1 = copy error, 0 = skip, 1 = copy success
     my($src, $dst, $file, $which) = @_;
     my $free = $free{$dst};
     if (($free - $size{$file}) / $GB < $MIN or
 	$size{$file} > $free * $MAX) { # file too big?
-	printf "skipping %.3f GB $file, %.3f free on $dst\n",
+	printf "# skipping %.3f GB $file, %.3f free on $dst\n",
 	$size{$file} / $GB, $free / $GB;
 	return 0;
     }
@@ -169,6 +171,7 @@ sub move {		 # -1 = copy error, 0 = skip, 1 = copy success
 	$free{$dst} -= $size{$file};
     }
     $count{$which}++;
+    $count{"GB$which"} += $size{$file};
     return 1;			# only if copy successful
 }
 
