@@ -2,6 +2,8 @@
 
 # mythtv-balance-expire by twitham@sbcglobal.net, 2017-02-18
 
+# perldoc this file for full manual, or just search for __END__ below.
+
 # All disks must have expiring recordings, ideally from the full range
 # of recorded time so that each disk expires only oldest recordings.
 # This distributes expirable recordings evenly over all disks and
@@ -173,9 +175,13 @@ mythtv-balance-expire - move recording files to balance multiple disks
 
 =head1 SYNOPSIS
 
- mythtv-balance-expire [--help | --man] [--delta N] [--verbose] [--go]
-    --help	show usage of all options and exit
-    --man	show the full manual and exit
+ mythtv-balance-expire [--help | --man | options]
+    --help	show full usage of options and exit
+    --man	show the full manual page and exit
+    --delta=N	expiring count delta allowed between disks [5]
+    --subtitles	add subtitles to titles of moving files
+    --verbose	show the commands that would be run, or are being run:
+    --go	actually do the moves, else just show what would be done
 
 =head1 DESCRIPTION
 
@@ -188,9 +194,8 @@ another.  The new disk now gets most new recordings since it has more
 free space.  6 months later both are full and recording new shows.
 But the original disk is now expiring files from 1 year ago while the
 new disk is expiring files only 6 months old.  Mythtv's auto-expire
-list leads you to believe you have a year of recordings but this is
-misleading since the new disk must expire shows much younger since it
-has no older shows.
+list implies your are losing 1 year old recordings but this is
+misleading since the new disk must expire shows much younger.
 
 Or, say you have a small disk and a large one, both full and recording
 via auto-expire.  And you disable auto-expire on shows you really want
@@ -302,6 +307,10 @@ You must have ~/.mythtv/config.xml configured to read your database
 and must be root or mythtv on the server for write permission to move
 the files.  As shown in B<--verbose>, rsync(1) is required.
 
+This only works with local files and may be confused by multiple
+backends or remote paths.  Patches welcome if you have such a setup.
+Maybe all we need to do is test that recordings exist locally.
+
 Of course moving dozens of files will take a long time, so be patient
 when using B<--go>.  Rsync(1) --progress is shown on the terminal.
 
@@ -313,7 +322,7 @@ If your disks are different sizes, it may not be possible to balance
 recent time.  This is normal - you will balance that time later when
 you run this again in the future.  In fact, it is a good idea to run
 this periodically; I do so once a month.  If you really trust the
-actions, you might cron(1) this with redirection to a log file.
+actions, you might crontab(1) this with redirection to a log file.
 
 =head1 COPYRIGHT
 
