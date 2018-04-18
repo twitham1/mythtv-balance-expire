@@ -76,8 +76,9 @@ while (my $move = shift @exp) {	# expirables in time order
     my $more = pop @p;		# path with most expires
     my $less = shift @p;	# path with least expires
     my $exp = scalar keys %{$exp{$where{$move}}};
-    print "\t" x $n{$where{$move}}, "$exp\t$move\t$where{$move}"
-	. ($moved{$move} ? " # moved \@ $moved{$move}\n" : "\n");
+    print "\t" x $n{$where{$move}}, $exp, "\t" x ($n - $n{$where{$move}});
+    print "$move\t$where{$move}", $moved{$move} ?
+	" # moved \@ $moved{$move}\n" : "\n";
     unless ($where{$move} eq $more) { # keep it here if not path of most
 	$exp{$where{$move}}{$move}++;
 	next;
@@ -339,15 +340,14 @@ you run this again in the future.  In fact, it is a good idea to run
 this periodically; I do so once a month.  If you really trust the
 actions, you might crontab(1) this with redirection to a log file.
 
-=head1 COPYRIGHT
+=head1 AUTHOR
+
+Timothy D Witham <twitham@sbcglobal.net>
+
+=head1 COPYRIGHT AND LICENSE
 
 Copyright 2017-2018 Timothy D Witham.
 
 This program is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself.
-
-=head1 AUTHOR
-
-Timothy D Witham <twitham@sbcglobal.net>
-
 =cut
