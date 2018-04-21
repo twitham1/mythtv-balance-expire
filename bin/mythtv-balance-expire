@@ -50,6 +50,7 @@ foreach my $row (@{$rows{rows}}) { # gather status and location of shows
     my $show = $myth->new_recording(@$row);
     my $key = $show->{basename};
     my $path = $show->{local_path};
+    -f $path or next;		# skip remote paths
     (my $dir = $path) =~ s@/[^/]+$@@;
     $dir =~ m@/@ or next;	# only old files in a local path
     $show->{lastmodified} < $RECENT or next;
@@ -325,7 +326,6 @@ the files.  As shown in B<--verbose>, rsync(1) is required.
 
 This only works with local files and may be confused by multiple
 backends or remote paths.  Patches welcome if you have such a setup.
-Maybe all we need to do is test that recordings exist locally.
 
 Of course moving dozens of files will take a long time, so be patient
 when using B<--go>.  Rsync(1) --progress is shown on the terminal.
