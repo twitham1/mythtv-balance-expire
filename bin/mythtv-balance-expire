@@ -40,6 +40,8 @@ my %where;			# {basename} = dir
 my %free;			# {dir} = bytes free on disk
 my %count = qw/< 0 > 0 GB< 0 GB> 0/; # {type} = count/size of moves
 
+-t STDIN and $| = 1 and print "Reading database, please wait...\r";
+
 my $myth = new MythTV();   # we'll keep expires in chronological order:
 my %rows = $myth->backend_rows('QUERY_RECORDINGS Ascending');
 
@@ -65,7 +67,11 @@ foreach my $row (@{$rows{rows}}) { # gather status and location of shows
 }
 
 my @path = sort keys %exp;	# storage paths found
-@path > 1 or die "need 2 or more paths to balance, found: @path\n";
+@path > 1 or
+    die "need 2 or more paths to balance, found: @path\n";
+my @oops = grep { ! -w $_ } @path;
+$opt{go} and @oops and
+    die "@oops not writable, are you root or owner?\n";
 my $n = 0;
 for my $dir (@path) {		# per-disk metrics
     $n{$dir} = $n++;		# disk number, for indent columns
@@ -144,6 +150,7 @@ print $opt{go} ? "MOVED:  <<< "
     : "NOTHING DONE!  Add --go to actually move <<< ";
 printf "%d = %.3f GB expires <<< and >>> %d = %.3f GB keepers >>>.\n",
     $count{'<'}, $count{'GB<'} / $GB, $count{'>'}, $count{'GB>'} / $GB;
+@oops and print "@oops not writeable, must be root or owner to --go\n";
 
 sub move {		 # -1 = copy error, 0 = skip, 1 = copy success
     my($src, $dst, $file, $which) = @_;
@@ -328,7 +335,8 @@ This only works with local files and may be confused by multiple
 backends or remote paths.  Patches welcome if you have such a setup.
 
 Of course moving dozens of files will take a long time, so be patient
-when using B<--go>.  Rsync(1) --progress is shown on the terminal.
+when using B<--go>.  The initial B<--go> will need to move more files
+than later runs.  Rsync(1) --progress is shown on the terminal.
 
 This does not update the database at all.  Mythtv will automatically
 discover the new locations of the recordings.  Allow time for this to
