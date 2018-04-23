@@ -40,7 +40,7 @@ my %where;			# {basename} = dir
 my %free;			# {dir} = bytes free on disk
 my %count = qw/< 0 > 0 GB< 0 GB> 0/; # {type} = count/size of moves
 
--t STDIN and $| = 1 and print "Reading database, please wait...\r";
+-t STDIN and $| = 1 and print "Reading database, please wait...";
 
 my $myth = new MythTV();   # we'll keep expires in chronological order:
 my %rows = $myth->backend_rows('QUERY_RECORDINGS Ascending');
@@ -65,6 +65,8 @@ foreach my $row (@{$rows{rows}}) { # gather status and location of shows
     $show->{auto_expire} ? push @exp, $key : $keep{$dir}{$key}++;
     $exp{$dir} or $exp{$dir} = { one => 1 };
 }
+
+-t STDIN and print "\r", ' ' x 35, "\r"; # erase info line
 
 my @path = sort keys %exp;	# storage paths found
 @path > 1 or
