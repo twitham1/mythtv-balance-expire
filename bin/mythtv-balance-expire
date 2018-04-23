@@ -23,7 +23,7 @@ pod2usage(1) if $opt{help};
 pod2usage(-verbose => 2) if $opt{man};
 
 # How to copy the files.  If successful, originals are unlinked
-my @copy = qw/ionice -n 7 nice rsync -a/; # must exit 0 on success only
+my @copy = qw(ionice -n 7 nice rsync -a); # must exit 0 on success only
 push @copy, '--progress' if -t STDOUT;
 my $RECENT = time - 3 * 24 * 60 * 60; # don't move recent files
 my $MAX = 0.5;			# maximum free space to use for copies
@@ -38,7 +38,7 @@ my %size;			# {basename} = bytes in file
 my %title;			# {basename} = title [/ subtitle]
 my %where;			# {basename} = dir
 my %free;			# {dir} = bytes free on disk
-my %count = qw/< 0 > 0 GB< 0 GB> 0/; # {type} = count/size of moves
+my %count = qw(< 0 > 0 GB< 0 GB> 0); # {type} = count/size of moves
 my $count = 0;			     # record count
 
 -t STDOUT and $| = 1 and print "Reading database, please wait...";
@@ -153,7 +153,7 @@ for my $dir (sort keys %exp) {	# results summary footer
 print $opt{go} ? "MOVED:  <<< "
     : "NOTHING DONE!  Add --go to actually move <<< ";
 printf "%d = %.3f GB expires <<< and >>> %d = %.3f GB keepers >>>.\n",
-    $count{'<'}, $count{'GB<'} / $GB, $count{'>'}, $count{'GB>'} / $GB;
+    map { $count{$_} } qw(< GB< > GB>);
 @oops and print "@oops not writeable, must be root or owner to --go\n";
 
 sub move {		 # -1 = copy error, 0 = skip, 1 = copy success
@@ -184,7 +184,7 @@ sub move {		 # -1 = copy error, 0 = skip, 1 = copy success
 	$free{$dst} -= $size{$file};
     }
     $count{$which}++;
-    $count{"GB$which"} += $size{$file};
+    $count{"GB$which"} += $size{$file} / $GB;
     return 1;			# only if copy successful
 }
 
