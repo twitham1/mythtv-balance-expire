@@ -24,7 +24,7 @@ pod2usage(-verbose => 2) if $opt{man};
 
 # How to copy the files.  If successful, originals are unlinked
 my @copy = qw/ionice -n 7 nice rsync -a/; # must exit 0 on success only
-push @copy, '--progress' if -t STDIN;
+push @copy, '--progress' if -t STDOUT;
 my $RECENT = time - 3 * 24 * 60 * 60; # don't move recent files
 my $MAX = 0.5;			# maximum free space to use for copies
 my $MIN = 2.0;			# minimum disk headroom in GB
@@ -41,7 +41,7 @@ my %free;			# {dir} = bytes free on disk
 my %count = qw/< 0 > 0 GB< 0 GB> 0/; # {type} = count/size of moves
 my $count = 0;			     # record count
 
--t STDIN and $| = 1 and print "Reading database, please wait...";
+-t STDOUT and $| = 1 and print "Reading database, please wait...";
 
 my $myth = new MythTV();   # we'll keep expires in chronological order:
 my %rows = $myth->backend_rows('QUERY_RECORDINGS Ascending');
@@ -50,7 +50,7 @@ my %rows = $myth->backend_rows('QUERY_RECORDINGS Ascending');
 defined $opt{keepers} and $opt{go} = 0;
 
 foreach my $row (@{$rows{rows}}) { # gather status and location of shows
-    -t STDIN and printf "%5d%s", $count++, "\b" x 5;
+    -t STDOUT and printf "%5d%s", $count++, "\b" x 5;
     my $show = $myth->new_recording(@$row);
     my $key = $show->{basename};
     my $path = $show->{local_path};
@@ -68,7 +68,7 @@ foreach my $row (@{$rows{rows}}) { # gather status and location of shows
     $exp{$dir} or $exp{$dir} = { one => 1 };
 }
 
--t STDIN and print "\r", ' ' x 35, "\r"; # erase info line
+-t STDOUT and print "\r", ' ' x 35, "\r"; # erase info line
 
 my @path = sort keys %exp;	# storage paths found
 @path > 1 or
@@ -319,7 +319,7 @@ Append subtitles to titles of moving files.
 =item B<--verbose>
 
 Show the commands that will be run, or are being run with B<--go>.  If
-STDIN is a terminal, then rsync(1) will use its B<--progress> option
+STDOUT is a terminal, then rsync(1) will use its B<--progress> option
 to show copy progress, even without this B<--verbose>.
 
 =item B<--go>
