@@ -240,9 +240,9 @@ the disks.
 Run with no arguments.  This will take no actions and just show the
 expiring recordings and recommended moves.
 
-The output shows expiring recordings in time sorted order.  Lines are
-indented per disk, so each "column" is a different disk.  The lines
-look like:
+The output shows expiring recordings in time sorted order.  Counts are
+indented per disk, so each count "column" is a different disk.  The
+lines look like:
 
 	NNN	CHAN_YYYYMMDDHHMMSS.mpg /path/to/recording
 
@@ -250,15 +250,17 @@ look like:
 
 =item B<NNN>
 
-Number of expiring files on this recording path
+Number of expiring files so far on this recording path.  Each path is
+indented to a unique column.
 
 =item B<CHAN_YYYYMMDDHHMMSS.mpg>
 
-Recording file name: channel, time stamp and file extension
+Recording file name: channel, time stamp and file extension.  The
+lines are sorted by the YYYYMMDDHHMMSS time stamp of the recording.
 
 =item B</path/to/recording>
 
-Current path to the recording file
+Current path to the recording file.
 
 =back
 
