@@ -39,6 +39,7 @@ my %title;			# {basename} = title [/ subtitle]
 my %where;			# {basename} = dir
 my %free;			# {dir} = bytes free on disk
 my %count = qw/< 0 > 0 GB< 0 GB> 0/; # {type} = count/size of moves
+my $count = 0;			     # record count
 
 -t STDIN and $| = 1 and print "Reading database, please wait...";
 
@@ -49,6 +50,7 @@ my %rows = $myth->backend_rows('QUERY_RECORDINGS Ascending');
 defined $opt{keepers} and $opt{go} = 0;
 
 foreach my $row (@{$rows{rows}}) { # gather status and location of shows
+    -t STDIN and printf "%5d%s", $count++, "\b" x 5;
     my $show = $myth->new_recording(@$row);
     my $key = $show->{basename};
     my $path = $show->{local_path};
