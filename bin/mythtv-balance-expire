@@ -43,7 +43,7 @@ my %free;			# {dir} = bytes free on disk
 my %count = qw(< 0 > 0 GB< 0 GB> 0); # {type} = count/size of moves
 my $count = 0;			     # record count
 
-$| = 1 and print "Reading database, please wait..." if $interactive;
+do { $| = 1; print "Reading database, please wait..." } if $interactive;
 
 my $myth = new MythTV();   # we'll keep expires in chronological order:
 my %rows = $myth->backend_rows('QUERY_RECORDINGS Ascending');
