@@ -22,11 +22,13 @@ GetOptions(\%opt, qw(help|? man delta=i subtitles verbose go keepers=i))
 pod2usage(1) if $opt{help};
 pod2usage(-verbose => 2) if $opt{man};
 
+my $interactive = -t STDOUT;	# interactive terminal updates?
+
 # How to copy the files.  If successful, originals are unlinked
 my @copy = qw(ionice -n 7 nice rsync -a); # must exit 0 on success only
-push @copy, '--progress' if -t STDOUT;
+push @copy, '--progress' if $interactive;
 my $RECENT = time - 3 * 24 * 60 * 60; # don't move recent files
-my $MAX = 0.5;			# maximum free space to use for copies
+my $MAX = 0.7;			# maximum free space to use for copies
 my $MIN = 2.0;			# minimum disk headroom in GB
 my $KB = 1024;
 my $MB = $KB * $KB;
@@ -41,7 +43,7 @@ my %free;			# {dir} = bytes free on disk
 my %count = qw(< 0 > 0 GB< 0 GB> 0); # {type} = count/size of moves
 my $count = 0;			     # record count
 
--t STDOUT and $| = 1 and print "Reading database, please wait...";
+$| = 1 and print "Reading database, please wait..." if $interactive;
 
 my $myth = new MythTV();   # we'll keep expires in chronological order:
 my %rows = $myth->backend_rows('QUERY_RECORDINGS Ascending');
@@ -50,7 +52,7 @@ my %rows = $myth->backend_rows('QUERY_RECORDINGS Ascending');
 defined $opt{keepers} and $opt{go} = 0;
 
 foreach my $row (@{$rows{rows}}) { # gather status and location of shows
-    -t STDOUT and printf "%5d%s", $count++, "\b" x 5;
+    printf "%5d%s", $count++, "\b" x 5 if $interactive;
     my $show = $myth->new_recording(@$row);
     my $key = $show->{basename};
     my $path = $show->{local_path};
@@ -68,7 +70,7 @@ foreach my $row (@{$rows{rows}}) { # gather status and location of shows
     $exp{$dir} or $exp{$dir} = { one => 1 };
 }
 
--t STDOUT and print "\r", ' ' x 35, "\r"; # erase info line
+print "\r", ' ' x 35, "\r" if $interactive; # erase status line
 
 my @path = sort keys %exp;	# storage paths found
 @path > 1 or
