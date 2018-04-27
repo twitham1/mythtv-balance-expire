@@ -17,7 +17,8 @@ use Getopt::Long;
 use Pod::Usage;
 
 my %opt = (delta => 5);	       # lower = better balance but more moves
-GetOptions(\%opt, qw(help|? man delta=i subtitles verbose go keepers=i))
+GetOptions(\%opt, qw(help|? man delta=i subtitles verbose go
+    keepers=i disks=i))
     or pod2usage(2);
 pod2usage(1) if $opt{help};
 pod2usage(-verbose => 2) if $opt{man};
@@ -49,8 +50,8 @@ my $myth = new MythTV();   # we'll keep expires in chronological order:
 my %rows = $myth->backend_rows('QUERY_RECORDINGS Ascending');
 my $rows = @{$rows{rows}} or die "no records found!\n";
 
-# UNDOCUMENTED: ignore DB and pretend X % are keepers (for dev/testing)
-defined $opt{keepers} and $opt{go} = 0;
+# UNDOCUMENTED: simulate alternate disks or keep percentage for testing
+($opt{disks} or defined $opt{keepers}) and $opt{go} = 0;
 
 foreach my $row (@{$rows{rows}}) { # gather status and location of shows
     printf "%5d /%5d = %3d%%%s", ++$count, $rows,
@@ -59,6 +60,9 @@ foreach my $row (@{$rows{rows}}) { # gather status and location of shows
     my $key = $show->{basename};
     my $path = $show->{local_path};
     -f $path or next;		# skip remote paths
+    $opt{disks} and	  # UNDOCUMENTED: pretend different disk count
+	$path =~ s{.*/}{sprintf "/var/lib/mythtv%d/recordings/",
+	rand $opt{disks}}e;
     (my $dir = $path) =~ s@/[^/]+$@@;
     $dir =~ m@/@ or next;	# only old files in a local path
     $show->{lastmodified} < $RECENT or next;
@@ -83,7 +87,7 @@ $opt{go} and @oops and
 my $n = 0;
 for my $dir (@path) {		# per-disk metrics
     $n{$dir} = $n++;		# disk number, for indent columns
-    $free{$dir} = &free($dir) * $KB; # bytes free, updated by &move
+    $free{$dir} = &free($dir);	# bytes free, updated by &move
 }
 
 while (my $move = shift @exp) {	# expirables in time order
@@ -179,8 +183,8 @@ sub move {		 # -1 = copy error, 0 = skip, 1 = copy success
 	    or warn sprintf("exit %d from (@cmd)\n", $? >> 8)
 	    and return -1;
 	map { unlink $_ or warn "could not unlink $_: $!\n" } @src;
-	$free{$src} = &free($src) * $KB; # actual disk headrooms
-	$free{$dst} = &free($dst) * $KB;
+	$free{$src} = &free($src); # actual disk headrooms
+	$free{$dst} = &free($dst);
     } else {			# estimated disk headrooms
 	$free{$src} += $size{$file};
 	$free{$dst} -= $size{$file};
@@ -190,7 +194,11 @@ sub move {		 # -1 = copy error, 0 = skip, 1 = copy success
     return 1;			# only if copy successful
 }
 
-sub free { return (&df(shift))[3]; } # free space of path in KB
+sub free {			# free space of path in GB
+    my($dir) = @_;
+    $opt{disks} and return rand(20 * $GB); # random free space
+    return (&df($dir))[3] * $KB;
+}
 
 sub df {			# df of $file in KB
     my($file) = @_;
