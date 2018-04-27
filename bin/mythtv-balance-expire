@@ -47,12 +47,14 @@ do { $| = 1; print "Reading database, please wait..." } if $interactive;
 
 my $myth = new MythTV();   # we'll keep expires in chronological order:
 my %rows = $myth->backend_rows('QUERY_RECORDINGS Ascending');
+my $rows = @{$rows{rows}} or die "no records found!\n";
 
 # UNDOCUMENTED: ignore DB and pretend X % are keepers (for dev/testing)
 defined $opt{keepers} and $opt{go} = 0;
 
 foreach my $row (@{$rows{rows}}) { # gather status and location of shows
-    printf "%5d%s", $count++, "\b" x 5 if $interactive;
+    printf "%5d /%5d = %3d%%%s", ++$count, $rows,
+    $count / $rows * 100, "\b" x 19 if $interactive;
     my $show = $myth->new_recording(@$row);
     my $key = $show->{basename};
     my $path = $show->{local_path};
@@ -137,8 +139,6 @@ while (my $move = shift @exp) {	# expirables in time order
     $code < 0 and last;
     if ($which eq '>') {	# record the move
 	$keep{$more}{$swap}++; delete $keep{$less}{$swap};
-    } else {
-	$where{$swap} = $more;
     }
     $moved{$swap} = $exp;
 }
@@ -366,4 +366,5 @@ Copyright 2017-2018 Timothy D Witham.
 
 This program is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself.
+
 =cut
