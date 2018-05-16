@@ -17,7 +17,7 @@ use Getopt::Long;
 use Pod::Usage;
 
 my %opt = (delta => 5);	       # lower = better balance but more moves
-GetOptions(\%opt, qw(help|? man delta=i subtitles verbose go
+GetOptions(\%opt, qw(help|? man delta=i titles subtitles verbose go
     keepers=i disks=i))
     or pod2usage(2);
 pod2usage(1) if $opt{help};
@@ -68,7 +68,7 @@ foreach my $row (@{$rows{rows}}) { # gather status and location of shows
     $show->{lastmodified} < $RECENT or next;
     $size{$key} = $show->{filesize};
     $title{$key} = $show->{title};
-    $opt{subtitles} and $title{$key} .= " / $show->{subtitle}";
+    $opt{subtitles} and $title{$key} .= " -- $show->{subtitle}";
     $where{$key} = $dir;
     defined $opt{keepers} and  # UNDOCUMENTED: pretend X % are keepers
 	$show->{auto_expire} = rand(100) > $opt{keepers} ? 1 : 0;
@@ -96,7 +96,8 @@ while (my $move = shift @exp) {	# expirables in time order
     my $less = shift @p;	# path with least expires
     my $exp = scalar keys %{$exp{$where{$move}}};
     print "\t" x $n{$where{$move}}, $exp, "\t" x ($n - $n{$where{$move}});
-    print "$move\t$where{$move}", $moved{$move} ?
+    my $t = $opt{titles} ? "\t$title{$move}" : "";
+    print "$move\t$where{$move}$t", $moved{$move} ?
 	" # moved \@ $moved{$move}\n" : "\n";
     unless ($where{$move} eq $more) { # keep it here if not path of most
 	$exp{$where{$move}}{$move}++;
@@ -217,7 +218,8 @@ mythtv-balance-expire - move recording files to balance multiple disks
     --help	show full usage of options and exit
     --man	show the full manual page and exit
     --delta=N	expiring count delta allowed between disks [5]
-    --subtitles	add subtitles to titles of moving files
+    --titles	append titles to all files, not just moving files
+    --subtitles	append subtitles to titles
     --verbose	show the commands that would be run, or are being run:
     --go	actually do the moves, else just show what would be done
 
@@ -272,7 +274,8 @@ lines are sorted by the YYYYMMDDHHMMSS time stamp of the recording.
 
 =item B</path/to/recording>
 
-Current path to the recording file.
+Current path to the recording file.  The B<--title> of the file is
+optionally shown.
 
 =back
 
@@ -322,9 +325,14 @@ they will affect disk headroom, before deciding to use B<--go>.  A
 high value like 9999 will simply show the current [im]balance with no
 moves.  The default delta is 5.
 
+=item B<--titles>
+
+Show titles of all recording files.  Without this option, titles are
+shown only for files that are moving.
+
 =item B<--subtitles>
 
-Append subtitles to titles of moving files.
+Append subtitles to all titles.
 
 =item B<--verbose>
 
