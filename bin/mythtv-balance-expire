@@ -55,14 +55,14 @@ my $rows = @{$rows{rows}} or die "no records found!\n";
 
 foreach my $row (@{$rows{rows}}) { # gather status and location of shows
     printf "%5d /%5d = %3d%%%s", ++$count, $rows,
-    $count / $rows * 100, "\b" x 19 if $interactive;
+	$count / $rows * 100, "\b" x 19 if $interactive;
     my $show = $myth->new_recording(@$row);
     my $key = $show->{basename};
     my $path = $show->{local_path};
-    -f $path or next;		# skip remote paths
+    -f $path or next;	  # skip remote paths
     $opt{disks} and	  # UNDOCUMENTED: pretend different disk count
 	$path =~ s{.*/}{sprintf "/var/lib/mythtv%d/recordings/",
-	rand $opt{disks}}e;
+			    1 + rand $opt{disks}}e;
     (my $dir = $path) =~ s@/[^/]+$@@;
     $dir =~ m@/@ or next;	# only old files in a local path
     $show->{lastmodified} < $RECENT or next;
@@ -97,8 +97,8 @@ while (my $move = shift @exp) {	# expirables in time order
     my $less = shift @p;	# path with least expires
     my $exp = scalar keys %{$exp{$where{$move}}};
     print "\t" x $n{$where{$move}},
-    $opt{size} ? sprintf "%.1f", &expsize($where{$move}) / $GB : $exp,
-    "\t" x ($n - $n{$where{$move}});
+	$opt{size} ? sprintf "%.1f", &expsize($where{$move}) / $GB : $exp,
+	"\t" x ($n - $n{$where{$move}});
     my $diff = $opt{size} ? (&expsize($more) - &expsize($less)) / $GB
 	:  ((keys %{$exp{$more}}) - (keys %{$exp{$less}}));
     printf "%.0f\t", $diff;
@@ -123,7 +123,7 @@ while (my $move = shift @exp) {	# expirables in time order
 	(!$large or $size{$large} < $size{$move})) {
 	$large ||= 'NONE'; $size{NONE} = 0;
 	printf "# largest trade $large %.3f < $move %.3f, skipping\n",
-	$size{$large} / $GB, $size{$move} / $GB;
+	    $size{$large} / $GB, $size{$move} / $GB;
 	$exp{$more}{$move}++;	# skipped, keep it here
 	next;
     }
@@ -182,12 +182,12 @@ sub move {		 # -1 = copy error, 0 = skip, 1 = copy success
     if (($free - $size{$file}) / $GB < $MIN or
 	$size{$file} > $free * $MAX) { # file too big?
 	printf "# skipping %.3f GB $file, %.3f free on $dst\n",
-	$size{$file} / $GB, $free / $GB;
+	    $size{$file} / $GB, $free / $GB;
 	return 0;
     }
     $free -= $size{$file};
     printf "$which %7.3f $file: $src -> $dst %4d %7.3f $which %s\n",
-    $size{$file} / $GB, scalar(keys %{$exp{$dst}}), $free / $GB, $title{$file};
+	$size{$file} / $GB, scalar(keys %{$exp{$dst}}), $free / $GB, $title{$file};
 
     my @src = glob "$src/${file}*"; # list includes thumbnails
     my @cmd = (@copy, @src, "$dst/");
@@ -409,7 +409,7 @@ Timothy D Witham <twitham@sbcglobal.net>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright 2017-2018 Timothy D Witham.
+Copyright 2017-2019 Timothy D Witham.
 
 This program is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself.
