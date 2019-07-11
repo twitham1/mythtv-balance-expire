@@ -1,3 +1,3 @@
 
-README.txt:	bin/mythtv-balance-expire
-	pod2text -a bin/mythtv-balance-expire > README.txt
+README.pod:	bin/mythtv-balance-expire
+	podselect bin/mythtv-balance-expire > README.pod
