@@ -16,12 +16,13 @@ use MythTV;
 use Getopt::Long;
 use Pod::Usage;
 
-my %opt = (delta => 5);	       # lower = better balance but more moves
-GetOptions(\%opt, qw(help|? man size delta=i titles subtitles verbose go
-    keepers=i disks=i))
+my %opt = (delta => 10);       # lower = better balance but more moves
+GetOptions(\%opt, qw(help|? man delta=i titles subtitles verbose go
+    size files keepers=i disks=i))
     or pod2usage(2);
 pod2usage(1) if $opt{help};
 pod2usage(-verbose => 2) if $opt{man};
+$opt{files} or $opt{size} = 1;	# --size is default if not --files
 
 my $interactive = -t STDOUT;	# interactive terminal updates?
 
@@ -230,8 +231,8 @@ mythtv-balance-expire - move recording files to balance multiple disks
  mythtv-balance-expire [--help | --man | options]
     --help	show full usage of options and exit
     --man	show the full manual page and exit
-    --size	balance by file size rather than file count
-    --delta=N	expiring count delta allowed between disks [5]
+    --files	balance by file count rather than by file size
+    --delta=N	expiring file delta allowed between disks [10]
     --titles	append titles to all files, not just moving files
     --subtitles	append subtitles to titles
     --verbose	show the commands that would be run, or are being run:
@@ -268,8 +269,8 @@ the disks.
 Run with no arguments.  This will take no actions and just show the
 expiring recordings and recommended moves.
 
-The output shows expiring recordings in time sorted order.  Counts are
-indented per disk, so each count "column" is a different disk.  The
+The output shows expiring recordings in time sorted order.  Sums are
+indented per disk, so each sum "column" is a different disk.  The
 lines look like:
 
 	SUM DELTA GB CHAN_YYYYMMDDHHMMSS.mpg /path/to/recording
@@ -278,9 +279,8 @@ lines look like:
 
 =item B<SUM>
 
-Number of expiring files or B<--size> so far on this recording path,
-before placing the current file.  Each path is indented to a unique
-column.
+Amount of expiring data so far on this recording path, before placing
+the current file.  Each path is indented to a unique column.
 
 =item B<DELTA>
 
@@ -339,22 +339,21 @@ that you have permission to move the files.
 
 =over 8
 
-=item B<--size>
+=item B<--file>
 
-Balance by expiring file size rather than file count.  This may become
-the default in the future if it proves to work better than file count.
+Balance by expiring file count rather than file size.
 
 =item B<--delta N>
 
-Require each disk's expiring file count or size over time to be within
+Require each disk's expiring size or file count over time to be within
 N of all other disks.  If a disk has > N more than another, this
 triggers a file move to maintain this delta <= N.  Lower values
 produce a better balance while higher values need less moves.  You can
 manipulate this value to see how many moves will be required and how
 they will affect disk headroom, before deciding to use B<--go>.  A
 high value like 9999 will simply show the current [im]balance with no
-moves.  When used with B<--size>, the units are gigabytes, otherwise
-the units are file counts.  The default delta is 5.
+moves.  When used with B<--file>, the units are file counts, otherwise
+the units are gigabytes.  The default delta is 10.
 
 =item B<--titles>
 
