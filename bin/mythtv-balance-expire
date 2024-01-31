@@ -2,7 +2,7 @@
 
 # mythtv-balance-expire by twitham@sbcglobal.net, 2017-02-18
 
-# perldoc this file for full manual, or just search for __END__ below.
+# See --help and --man for the complete manual, at __END__ below
 
 # All disks must have expiring recordings, ideally from the full range
 # of recorded time so that each disk expires only oldest recordings.
@@ -17,11 +17,11 @@ use Getopt::Long;
 use Pod::Usage;
 
 my %opt = (delta => 10);       # lower = better balance but more moves
-GetOptions(\%opt, qw(help|? man delta=i titles subtitles verbose go
-    size files keepers=i disks=i))
+GetOptions(\%opt, qw(help|? manual delta=i titles subtitles verbose go
+    size files delete keepers=i disks=i))
     or pod2usage(2);
-pod2usage(1) if $opt{help};
-pod2usage(-verbose => 2) if $opt{man};
+pod2usage(-verbose => 0) if $opt{help};
+pod2usage(-verbose => 2) if $opt{manual};
 $opt{files} or $opt{size} = 1;	# --size is default if not --files
 
 my $interactive = -t STDOUT;	# interactive terminal updates?
@@ -41,6 +41,7 @@ my %keep;			# {dir}{keeping basenames}
 my %size = (one => 0);		# {basename} = bytes in file
 my %title;			# {basename} = title [/ subtitle]
 my %where;			# {basename} = dir
+my %show;			# {basename} = {show}
 my %free;			# {dir} = bytes free on disk
 my %count = qw(< 0 > 0 GB< 0 GB> 0); # {type} = count/size of moves
 my $count = 0;			     # record count
@@ -55,8 +56,8 @@ my $rows = @{$rows{rows}} or die "no records found!\n";
 ($opt{disks} or defined $opt{keepers}) and $opt{go} = 0;
 
 foreach my $row (@{$rows{rows}}) { # gather status and location of shows
-    printf "%5d /%5d = %3d%%%s", ++$count, $rows,
-	$count / $rows * 100, "\b" x 19 if $interactive;
+    printf "%5d /%5d recordings = %3d%%%s", ++$count, $rows,
+	$count / $rows * 100, "\b" x 30 if $interactive;
     my $show = $myth->new_recording(@$row);
     my $key = $show->{basename};
     my $path = $show->{local_path};
@@ -65,8 +66,10 @@ foreach my $row (@{$rows{rows}}) { # gather status and location of shows
 	$path =~ s{.*/}{sprintf "/var/lib/mythtv%d/recordings/",
 			    1 + rand $opt{disks}}e;
     (my $dir = $path) =~ s@/[^/]+$@@;
-    $dir =~ m@/@ or next;	# only old files in a local path
-    $show->{lastmodified} < $RECENT or next;
+    $dir =~ /live/i and next;	# ignore temporary livetv
+    $dir =~ m@/@ or next;	# only files in a local path
+    $show->{lastmodified} < $RECENT or next; # ignore recent files
+    $show{$key} = $show;
     $size{$key} = $show->{filesize};
     $title{$key} = $show->{title};
     $opt{subtitles} and $title{$key} .= " -- $show->{subtitle}";
@@ -80,8 +83,6 @@ foreach my $row (@{$rows{rows}}) { # gather status and location of shows
 print "\r", ' ' x 35, "\r" if $interactive; # erase status line
 
 my @path = sort keys %exp;	# storage paths found
-@path > 1 or
-    die "need 2 or more paths to balance, found: @path\n";
 my @oops = grep { ! -w $_ } @path;
 $opt{go} and @oops and
     die "@oops not writable, are you root or owner?\n";
@@ -91,7 +92,33 @@ for my $dir (@path) {		# per-disk metrics
     $free{$dir} = &free($dir);	# bytes free, updated by &move
 }
 
-while (my $move = shift @exp) {	# expirables in time order
+my $delete = 0;			   # Deleted files to delete..
+my $old = time - 14 * 24 * 60 * 60; # .. if older than this
+while (my $move = shift @exp) {	   # expirables in time order
+    my $show = $show{$move};
+    if ($show->{recgroup} eq 'Deleted' and
+	$show->{lastmodified} < $old) {
+	my $title = "$show->{title} -- $show->{subtitle}";
+	if ($opt{delete}) {
+	    print "DELETE:  $where{$move}/$move\t$title\n";
+	    # from flush_deleted_recgroup.pl:
+	    my $delete_command = 'DELETE_RECORDING ' .
+		$show->{'chanid'} . ' ' .
+		unix_to_myth_time($show->{'recstartts'}) .
+		' NO_FORCE';
+	    my $err = $myth->backend_command($delete_command);
+	    if ($err ne '-1') {
+		print "  error:  $err\n";
+	    } else {
+		$delete++;
+	    }
+	} else {
+	    print "# use --delete to remove $where{$move}/$move\t$title\n";
+	    $delete++;
+	}
+	next;
+    }
+    @path > 1 or next;		# one disk can offer --delete only
     my @p = $opt{size} ? sort { &expsize($a) <=> &expsize($b) } @path
 	: sort { keys %{$exp{$a}} <=> keys %{$exp{$b}} } @path;
     my $more = pop @p;		# path with most expires
@@ -105,7 +132,7 @@ while (my $move = shift @exp) {	# expirables in time order
     printf "%.0f\t", $diff;
     printf "%.3f\t", $size{$move} / $GB;
     my $t = $opt{titles} ? "\t$title{$move}" : "";
-    print "$move\t$where{$move}$t", $moved{$move} ?
+    print "$move\t$where{$move}\t$show{$move}{recgroup}$t", $moved{$move} ?
 	" # moved \@ $moved{$move}\n" : "\n";
     unless ($where{$move} eq $more) { # keep it here if not path of most
 	$exp{$where{$move}}{$move}++;
@@ -169,7 +196,15 @@ print $opt{go} ? "MOVED:  <<< "
     : "NOTHING DONE!  Add --go to actually move <<< ";
 printf "%d = %.3f GB expires <<< and >>> %d = %.3f GB keepers >>>.\n",
     map { $count{$_} } qw(< GB< > GB>);
-@oops and print "@oops not writeable, must be root or owner to --go\n";
+@oops and print
+    "WARNING: @oops not writeable, must be root or owner to --go\n";
+$delete and print "NOTE: ", $opt{delete} ?
+    "$delete files were deleted from the Deleted group\n" :
+    "use --delete to delete above $delete files from the Deleted group\n";
+@path > 1 or
+    die "need 2 or more paths to balance, found: @path\n";
+
+exit 0;				# all done!
 
 sub expsize {
     my($path) = @_;
@@ -229,12 +264,13 @@ mythtv-balance-expire - move recording files to balance multiple disks
 =head1 SYNOPSIS
 
  mythtv-balance-expire [--help | --man | options]
-    --help	show full usage of options and exit
+    --help	show these options and exit
     --man	show the full manual page and exit
     --files	balance by file count rather than by file size
     --delta=N	expiring file delta allowed between disks [10]
     --titles	append titles to all files, not just moving files
     --subtitles	append subtitles to titles
+    --delete	delete older recordings from Deleted group
     --verbose	show the commands that would be run, or are being run:
     --go	actually do the moves, else just show what would be done
 
@@ -273,7 +309,7 @@ The output shows expiring recordings in time sorted order.  Sums are
 indented per disk, so each sum "column" is a different disk.  The
 lines look like:
 
-	SUM DELTA GB CHAN_YYYYMMDDHHMMSS.mpg /path/to/recording
+    SUM DELTA GB CHAN_YYYYMMDDHHMMSS.ts /path/to/recording GROUP
 
 =over 4
 
@@ -292,30 +328,34 @@ is triggered.
 
 Size in gigabytes of this expiring file.
 
-=item B<CHAN_YYYYMMDDHHMMSS.mpg>
+=item B<CHAN_YYYYMMDDHHMMSS.ts>
 
 Recording file name: channel, time stamp and file extension.  The
 lines are sorted by the YYYYMMDDHHMMSS time stamp of the recording.
 
 =item B</path/to/recording>
 
-Current path to the recording file.  The B<--title> of the file is
-optionally shown.
+Current path to the recording file.
+
+=item B<GROUP>  [title]
+
+Recording group of the file and optionally its B<--title> and
+B<--subtitle>
 
 =back
 
 Suggested moves are shown when a file should move to produce a better
 balance.  These lines look like this:
 
-	< GB expirefile /too/many/path -> /too/few/path XXX free < title
-	> GB keeperfile /too/few/path -> /too/many/path YYY free > title
+    < GB expirefile /too/many/path -> /too/few/path XXX free < title
+    > GB keeperfile /too/few/path -> /too/many/path YYY free > title
 
 The expiring file is delimited by < and shown with its size in
 gigabytes.  It should move from the left path with too many to the
 right path with too few as shown by the arrow.  The resulting file
 count and free space of the destination location is shown.  Finally
-the title (and optionally B<--subtitle>) of the moving file is
-displayed.
+the recording group, title (and optionally B<--subtitle>) of the
+moving file is displayed.
 
 If the destination is now more full than the source, a trade is made.
 A file with auto-expire disabled (a permanent "keeper" file) is
@@ -332,8 +372,8 @@ If the suggested moves look correct, you can add B<--verbose> to see
 the commands that will be run.  For the successful copies, the
 original location will be removed.  If this still looks good, simply
 add B<--go> to actually do the given file moves.  When using B<--go>
-you must be root or the owner of the recording directories (mythtv) so
-that you have permission to move the files.
+you must be root or the owner of the recording directories (perhaps
+mythtv) so that you have permission to move the files.
 
 =head1 OPTIONS
 
@@ -363,6 +403,16 @@ shown only for files that are moving.
 =item B<--subtitles>
 
 Append subtitles to all titles.
+
+=item B<--delete>
+
+Old recordings found in the Deleted recording group are displayed with
+a note that B<--delete> may be used to delete them.  This could be
+needed for example when these recordings are no longer offered in the
+frontend due to a deletepending flag in the database.  See:
+https://forum.mythtv.org/viewtopic.php?f=36&t=2888&p=14057 Once used,
+the MythTV backend will do the file removes over some time.  This
+option has no effect if no old Deleted files are found.
 
 =item B<--verbose>
 
@@ -399,8 +449,8 @@ happen between B<--go> runs.
 If your disks are different sizes, it may not be possible to balance
 recent time.  This is normal - you will balance that time later when
 you run this again in the future.  In fact, it is a good idea to run
-this periodically; I do so once a month.  If you really trust the
-actions, you might crontab(1) this with redirection to a log file.
+this periodically; I do so once a month.  Once you trust the actions,
+you may crontab(1) this job with B<--go>.
 
 =head1 AUTHOR
 
@@ -408,7 +458,7 @@ Timothy D Witham <twitham@sbcglobal.net>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright 2017-2019 Timothy D Witham.
+Copyright 2017-2024 Timothy D Witham.
 
 This program is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself.
