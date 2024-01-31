@@ -12,6 +12,7 @@
 # all files are local.  Tested with 2 disks but should work with many.
 
 use warnings;
+use strict;
 use MythTV;
 use Getopt::Long;
 use Pod::Usage;
@@ -41,6 +42,7 @@ my %keep;			# {dir}{keeping basenames}
 my %size = (one => 0);		# {basename} = bytes in file
 my %title;			# {basename} = title [/ subtitle]
 my %where;			# {basename} = dir
+my %moved;			# {basename} = position
 my %show;			# {basename} = {show}
 my %free;			# {dir} = bytes free on disk
 my %count = qw(< 0 > 0 GB< 0 GB> 0); # {type} = count/size of moves
@@ -87,6 +89,7 @@ my @oops = grep { ! -w $_ } @path;
 $opt{go} and @oops and
     die "@oops not writable, are you root or owner?\n";
 my $n = 0;
+my %n;				# {dir} = disknumber
 for my $dir (@path) {		# per-disk metrics
     $n{$dir} = $n++;		# disk number, for indent columns
     $free{$dir} = &free($dir);	# bytes free, updated by &move
